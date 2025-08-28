@@ -4,7 +4,6 @@ import { sanitize } from './sanitize'
 // LocalStorage keys
 const USERS_KEY   = 'app_users_v1'
 const SESSION_KEY = 'app_session_v1'
-const LOCK_KEY    = 'app_lock_v1'
 const ITEMS_KEY   = 'app_items_v1'
 
 // Helpers
@@ -43,41 +42,37 @@ function seed(){
   }
   if (!LS.get(ITEMS_KEY, null)){
     LS.set(ITEMS_KEY, [
-      { id: uid(), title:'Intro to Vue 3', category:'Course', description:'Build reactive UIs with the Composition API.', reviews:[] },
-      { id: uid(), title:'Modern CSS Layouts', category:'Workshop', description:'Grid & Flexbox for responsive design.', reviews:[] },
-      { id: uid(), title:'Secure Frontend Basics', category:'Seminar', description:'XSS, CSP, sanitization, safe rendering.', reviews:[] },
+      { id: uid(), title:'Intro to Vue 3', category:'Course',   description:'Build reactive UIs with the Composition API.', reviews:[] },
+      { id: uid(), title:'Modern CSS Layouts', category:'Workshop', description:'Grid & Flexbox for responsive design.',       reviews:[] },
+      { id: uid(), title:'Secure Frontend Basics', category:'Seminar', description:'XSS, CSP, sanitization, safe rendering.',   reviews:[] },
     ])
   }
 }
 seed()
 
-// Global state
+// ===== Global state (no lock) =====
 const state = reactive({
-  users:    LS.get(USERS_KEY, []),
-  session:  LS.get(SESSION_KEY, null),
-  items:    LS.get(ITEMS_KEY, []),
-  lock:     LS.get(LOCK_KEY, { fails:0, until:0 }),
+  users:   LS.get(USERS_KEY, []),
+  session: LS.get(SESSION_KEY, null),
+  items:   LS.get(ITEMS_KEY, []),
 })
 
 // Computed flags
-const isLocked = computed(() => state.lock.until && Date.now() < state.lock.until)
 const isAdmin  = computed(() => state.session && state.session.role === 'admin')
 
-// Save everything
+// Persist helpers
 function saveAll(){
   LS.set(USERS_KEY, state.users)
   LS.set(SESSION_KEY, state.session)
   LS.set(ITEMS_KEY, state.items)
-  LS.set(LOCK_KEY, state.lock)
 }
 
-// Logout
+// Auth
 function logout(){
   state.session = null
   saveAll()
 }
 
-// Register new user
 async function register({ displayName, email, password }){
   const name = sanitize((displayName||'').trim())
   const mail = sanitize((email||'').trim().toLowerCase())
@@ -96,30 +91,19 @@ async function register({ displayName, email, password }){
   return state.session
 }
 
-// Login
+// ===== Login (lockout removed) =====
 async function login({ email, password }){
-  if (isLocked.value) throw new Error('Locked due to failed attempts. Try later.')
-
   const mail = sanitize((email||'').trim().toLowerCase())
   const user = state.users.find(u => u.email === mail)
-  if (!user){ bumpLock(); throw new Error('Invalid credentials') }
+  if (!user) throw new Error('Invalid credentials')
 
   const hash = await sha256Hex(password + user.salt)
-  if (hash !== user.passwordHash){ bumpLock(); throw new Error('Invalid credentials') }
+  if (hash !== user.passwordHash) throw new Error('Invalid credentials')
 
-  resetLock()
   state.session = { id:user.id, displayName:user.displayName, email:user.email, role:user.role }
   saveAll()
   return state.session
 }
-
-// Lockout helpers
-function bumpLock(){
-  state.lock.fails += 1
-  if (state.lock.fails >= 3){ state.lock.until = Date.now() + 60_000 } // 60s
-  saveAll()
-}
-function resetLock(){ state.lock = { fails:0, until:0 }; saveAll() }
 
 // Items management
 function addItem({ title, category, description }){
@@ -157,14 +141,59 @@ function submitReview(itemId, { rating, comment }){
 }
 function userReviews(){
   if (!state.session) return []
-  return state.items.flatMap(it=>it.reviews).filter(r=>r.byId === state.session.id).sort((a,b)=>b.createdAt - a.createdAt)
+  return state.items
+    .flatMap(it=>it.reviews)
+    .filter(r=>r.byId === state.session.id)
+    .sort((a,b)=>b.createdAt - a.createdAt)
+}
+
+// ===== External JSON -> items (dynamic data) =====
+async function loadExternalData(){
+  // 若已加载过（根据 _source 标记）就不重复
+  if (state.items.some(it => it._source === 'json')) return
+  const authorsUrl = new URL('../assets/json/authors.json', import.meta.url)
+  const storesUrl  = new URL('../assets/json/bookstores.json', import.meta.url)
+
+  const [authors, bookstores] = await Promise.all([
+    fetch(authorsUrl).then(r => r.json()).catch(() => []),
+    fetch(storesUrl).then(r => r.json()).catch(() => []),
+  ])
+
+  const authorItems = mapRecordsToItems(authors, 'Authors')
+  const storeItems  = mapRecordsToItems(bookstores, 'Bookstores')
+
+  state.items = [...authorItems, ...storeItems, ...state.items]
+  LS.set(ITEMS_KEY, state.items)
+}
+
+function mapRecordsToItems(records, category){
+  if (!Array.isArray(records)) return []
+  return records.map(rec => {
+    const title =
+      (rec && (rec.name || rec.title || rec.id)) ?
+      String(rec.name || rec.title || rec.id) : 'Record'
+
+    const pairs = Object.entries(rec || {}).slice(0, 4).map(([k, v]) => {
+      const val = typeof v === 'object' ? JSON.stringify(v) : String(v)
+      return `${k}: ${val}`
+    })
+    const desc = sanitize(pairs.join(' • '))
+
+    return {
+      id: uid(),
+      title: sanitize(title),
+      category,
+      description: desc || `${category} item`,
+      reviews: [],
+      _source: 'json',
+    }
+  })
 }
 
 // Export store
 export function useStore(){
   return {
     state,
-    isLocked,
     isAdmin,
     register,
     login,
@@ -174,5 +203,6 @@ export function useStore(){
     submitReview,
     avgRating,
     userReviews,
+    loadExternalData, // 给 Catalog 调用
   }
 }
