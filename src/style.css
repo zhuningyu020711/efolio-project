@@ -1,26 +1,128 @@
-/* Tag selectors */
-h1 {
-    text-align: center;
-    margin-top: 20px;
-    text-shadow: 4px 4px 8px rgba(0,0,0,0.5);
-  }
-  /* Class selectors */
-.form {
-    text-align: center;
-    margin-top: 50px;
-  }
-/* ID selectors */
-#username:focus,
-#password:focus,
-#isAustralian:focus,
-#reason:focus {
-  border-color: #FF6347;      
-  background-color: #FFEBE8;  
-
+/* ===== 全局颜色变量 ===== */
+:root {
+  --bg: #f5f7fa;         /* 页面背景：浅灰 */
+  --panel: #ffffff;      /* 面板背景：白色 */
+  --muted: #555;         /* 次要文字：深灰 */
+  --text: #222;          /* 主文字：近黑 */
+  --brand: #2b68ff;      /* 品牌蓝 */
+  --accent: #1dbb72;     /* 成功绿 */
+  --danger: #cc3f3f;     /* 错误红 */
 }
-/* Attribute selectors */
-select[id="gender"] {
-    background-color: #d3d3d3;
-  }
-  
 
+/* ===== 页面基础 ===== */
+* { box-sizing: border-box; }
+
+html, body, #app {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Helvetica, Arial, sans-serif;
+}
+
+/* ===== 顶部导航栏 ===== */
+header.bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #ffffffee;
+  backdrop-filter: saturate(150%) blur(6px);
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+}
+.brand { font-weight: 700; color: var(--brand); }
+
+/* ===== 容器 ===== */
+.wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
+
+/* ===== 卡片面板 ===== */
+.card {
+  background: var(--panel);
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 4px 10px rgba(0,0,0,.08);
+}
+
+.muted { color: var(--muted); }
+.note  { color: var(--muted); font-size: 14px; }
+
+/* ===== 布局工具 ===== */
+.hstack { display: flex; gap: 8px; align-items: center; }
+.inline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.grid   { display: grid; gap: 12px; }
+
+/* ===== 输入框 ===== */
+.input {
+  width: 100%;
+  border: 1px solid #ccc;
+  background: #fff;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 15px;
+}
+.input::placeholder { color: #666; }
+
+/* ===== 按钮 ===== */
+.btn {
+  border: 1px solid #ccc;
+  background: #f0f0f0;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn:hover { background: #e2e2e2; }
+
+.btn.primary {
+  background: var(--brand);
+  color: #fff;
+  border: none;
+}
+.btn.primary:hover { background: #1a4ecc; }
+
+.btn.success {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+}
+.btn.success:hover { background: #149d5d; }
+
+.btn.danger {
+  background: var(--danger);
+  color: #fff;
+  border: none;
+}
+.btn.danger:hover { background: #a62e2e; }
+
+/* ===== 标签小块 ===== */
+.pill {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f2f2f2;
+  border: 1px solid #ccc;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.star { font-size: 18px; color: #ffbb33; }
+
+/* ===== 错误/状态 ===== */
+.error { color: var(--danger); }
+.ok    { color: var(--accent); }
+
+/* ===== 表格（Admin.vue 用） ===== */
+.table { width: 100%; border-collapse: collapse; }
+.table th, .table td {
+  padding: 8px;
+  border-bottom: 1px solid #ddd;
+  text-align: left;
+}
