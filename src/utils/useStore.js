@@ -4,7 +4,7 @@ import { sanitize } from './sanitize'
 // LocalStorage keys
 const USERS_KEY   = 'app_users_v1'
 const SESSION_KEY = 'app_session_v1'
-const ITEMS_KEY   = 'app_items_v1'
+const ITEMS_KEY   = 'app_items_v2'
 
 // Helpers
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36)
