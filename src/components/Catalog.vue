@@ -25,4 +25,6 @@ function submit(id){
     form[id] = { rating:5, comment:'' }
   }catch(e){ alert(e.message) }
 }
+
+
 </script>

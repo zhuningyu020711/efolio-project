@@ -23,9 +23,9 @@ async function sha256Hex(str){
 
 // Seed admin + items
 function seed(){
-  const users = LS.get(USERS_KEY, [])
+  const users = LS.get(USERS_KEY, []);
   if (!users.some(u => u.email === 'admin@demo.local')){
-    const salt = uid()
+    const salt = uid();
     const admin = {
       id: uid(),
       displayName: 'Administrator',
@@ -33,22 +33,25 @@ function seed(){
       role: 'admin',
       salt,
       passwordHash: ''
-    }
+    };
     sha256Hex('Admin123!' + salt).then(hash => {
-      admin.passwordHash = hash
-      users.push(admin)
-      LS.set(USERS_KEY, users)
-    })
+      admin.passwordHash = hash;
+      users.push(admin);
+      LS.set(USERS_KEY, users);
+    });
   }
-  if (!LS.get(ITEMS_KEY, null)){
+
+  // ✅ 关键修改：为空/不是数组时才写入默认 items
+  const existing = LS.get(ITEMS_KEY, null);
+  if (!Array.isArray(existing) || existing.length === 0){
     LS.set(ITEMS_KEY, [
-      { id: uid(), title:'Intro to Vue 3', category:'Course',   description:'Build reactive UIs with the Composition API.', reviews:[] },
-      { id: uid(), title:'Modern CSS Layouts', category:'Workshop', description:'Grid & Flexbox for responsive design.',       reviews:[] },
-      { id: uid(), title:'Secure Frontend Basics', category:'Seminar', description:'XSS, CSP, sanitization, safe rendering.',   reviews:[] },
-    ])
+      { id: uid(), title:'Intro to Vue 3',         category:'Course',   description:'Build reactive UIs with the Composition API.', reviews:[] },
+      { id: uid(), title:'Modern CSS Layouts',     category:'Workshop', description:'Grid & Flexbox for responsive design.',       reviews:[] },
+      { id: uid(), title:'Secure Frontend Basics', category:'Seminar',  description:'XSS, CSP, sanitization, safe rendering.',     reviews:[] },
+    ]);
   }
 }
-seed()
+
 
 // ===== Global state (no lock) =====
 const state = reactive({
