@@ -1,19 +1,20 @@
+// src/utils/useStore.js
 import { reactive, computed } from 'vue'
 import { sanitize } from './sanitize'
 
-// LocalStorage keys
+// ===== LocalStorage keys (bump version to force fresh seed when needed) =====
 const USERS_KEY   = 'app_users_v1'
 const SESSION_KEY = 'app_session_v1'
-const ITEMS_KEY   = 'app_items_v2'
+const ITEMS_KEY   = 'app_items_v2'   // <- 升级为 v2，避免读取到旧的空数组
 
-// Helpers
+// ===== Helpers =====
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36)
 const LS = {
   get(k, fb){ try { return JSON.parse(localStorage.getItem(k)) ?? fb } catch { return fb } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) }
 }
 
-// Hash function (SHA-256, hex)
+// SHA-256 -> hex
 async function sha256Hex(str){
   const enc  = new TextEncoder().encode(str)
   const buf  = await crypto.subtle.digest('SHA-256', enc)
@@ -21,11 +22,21 @@ async function sha256Hex(str){
   return arr.map(b => b.toString(16).padStart(2,'0')).join('')
 }
 
-// Seed admin + items
+// 默认演示数据
+function defaultItems(){
+  return [
+    { id: uid(), title:'Intro to Vue 3',         category:'Course',   description:'Build reactive UIs with the Composition API.', reviews:[] },
+    { id: uid(), title:'Modern CSS Layouts',     category:'Workshop', description:'Grid & Flexbox for responsive design.',       reviews:[] },
+    { id: uid(), title:'Secure Frontend Basics', category:'Seminar',  description:'XSS, CSP, sanitization, safe rendering.',     reviews:[] },
+  ]
+}
+
+// ===== Seed admin + items (robust) =====
 function seed(){
-  const users = LS.get(USERS_KEY, []);
+  // admin
+  const users = LS.get(USERS_KEY, [])
   if (!users.some(u => u.email === 'admin@demo.local')){
-    const salt = uid();
+    const salt = uid()
     const admin = {
       id: uid(),
       displayName: 'Administrator',
@@ -33,44 +44,40 @@ function seed(){
       role: 'admin',
       salt,
       passwordHash: ''
-    };
+    }
     sha256Hex('Admin123!' + salt).then(hash => {
-      admin.passwordHash = hash;
-      users.push(admin);
-      LS.set(USERS_KEY, users);
-    });
+      admin.passwordHash = hash
+      users.push(admin)
+      LS.set(USERS_KEY, users)
+    })
   }
 
-  // ✅ 关键修改：为空/不是数组时才写入默认 items
-  const existing = LS.get(ITEMS_KEY, null);
+  // items：当不存在、不是数组、或为空数组时都重播种
+  const existing = LS.get(ITEMS_KEY, null)
   if (!Array.isArray(existing) || existing.length === 0){
-    LS.set(ITEMS_KEY, [
-      { id: uid(), title:'Intro to Vue 3',         category:'Course',   description:'Build reactive UIs with the Composition API.', reviews:[] },
-      { id: uid(), title:'Modern CSS Layouts',     category:'Workshop', description:'Grid & Flexbox for responsive design.',       reviews:[] },
-      { id: uid(), title:'Secure Frontend Basics', category:'Seminar',  description:'XSS, CSP, sanitization, safe rendering.',     reviews:[] },
-    ]);
+    LS.set(ITEMS_KEY, defaultItems())
   }
 }
+seed()
 
-
-// ===== Global state (no lock) =====
+// ===== Global state =====
 const state = reactive({
   users:   LS.get(USERS_KEY, []),
   session: LS.get(SESSION_KEY, null),
   items:   LS.get(ITEMS_KEY, []),
 })
 
-// Computed flags
-const isAdmin  = computed(() => state.session && state.session.role === 'admin')
+// ===== Computed =====
+const isAdmin = computed(() => state.session && state.session.role === 'admin')
 
-// Persist helpers
+// ===== Persist =====
 function saveAll(){
   LS.set(USERS_KEY, state.users)
   LS.set(SESSION_KEY, state.session)
   LS.set(ITEMS_KEY, state.items)
 }
 
-// Auth
+// ===== Auth =====
 function logout(){
   state.session = null
   saveAll()
@@ -94,7 +101,6 @@ async function register({ displayName, email, password }){
   return state.session
 }
 
-// ===== Login (lockout removed) =====
 async function login({ email, password }){
   const mail = sanitize((email||'').trim().toLowerCase())
   const user = state.users.find(u => u.email === mail)
@@ -108,7 +114,7 @@ async function login({ email, password }){
   return state.session
 }
 
-// Items management
+// ===== Items management =====
 function addItem({ title, category, description }){
   if (!isAdmin.value) throw new Error('Admins only')
   const t = sanitize((title||'').trim())
@@ -126,7 +132,7 @@ function removeItem(id){
   if (i>=0){ state.items.splice(i,1); saveAll() }
 }
 
-// Reviews
+// ===== Reviews =====
 function avgRating(item){
   if (!item.reviews.length) return 0
   return item.reviews.reduce((a,b)=>a + (b.rating||0), 0) / item.reviews.length
@@ -152,8 +158,9 @@ function userReviews(){
 
 // ===== External JSON -> items (dynamic data) =====
 async function loadExternalData(){
-  // 若已加载过（根据 _source 标记）就不重复
+  // 已加载过（带 _source 标记）则不重复
   if (state.items.some(it => it._source === 'json')) return
+
   const authorsUrl = new URL('../assets/json/authors.json', import.meta.url)
   const storesUrl  = new URL('../assets/json/bookstores.json', import.meta.url)
 
@@ -193,7 +200,13 @@ function mapRecordsToItems(records, category){
   })
 }
 
-// Export store
+// ===== Dev helper: reset demo data =====
+function resetItems(){
+  state.items = defaultItems()
+  saveAll()
+}
+
+// ===== Export store =====
 export function useStore(){
   return {
     state,
@@ -206,6 +219,7 @@ export function useStore(){
     submitReview,
     avgRating,
     userReviews,
-    loadExternalData, // 给 Catalog 调用
+    loadExternalData,
+    resetItems,     // 可选：开发期一键重置
   }
 }
