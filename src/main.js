@@ -34,3 +34,5 @@ const styleEl = document.createElement('style')
 styleEl.setAttribute('id','force-light')
 styleEl.textContent = forceLightCSS
 document.head.appendChild(styleEl)
+// TEMP: only once to clear old empty data, then remove this line.
+

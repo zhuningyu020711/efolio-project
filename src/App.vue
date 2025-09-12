@@ -12,7 +12,7 @@
   </header>
 
   <main class="wrap">
-    <!-- 美化后的 HOME -->
+    <!-- 首页 -->
     <section v-if="page==='home'" class="hero card">
       <div class="hero-head">
         <h1 class="hero-title">Manage campus events with ease</h1>
@@ -45,7 +45,7 @@
           <i class="pi pi-check-circle feat-icon"></i>
           <div>
             <h3>Validations</h3>
-            <p class="muted">HTML5 rules + custom checks for safe inputs.</p>
+            <p class="muted">Email, password and review validations included.</p>
           </div>
         </div>
         <div class="feat">
@@ -73,7 +73,7 @@
           <i class="pi pi-shield feat-icon"></i>
           <div>
             <h3>Security</h3>
-            <p class="muted">Sanitization, no v-html, lockout on brute force.</p>
+            <p class="muted">Sanitization & hashed passwords for safety.</p>
           </div>
         </div>
       </div>
@@ -85,7 +85,7 @@
     <!-- Catalog 页面 -->
     <Catalog v-else-if="page==='catalog'" />
 
-    <!-- 用户 Dashboard -->
+    <!-- Dashboard -->
     <section v-else-if="page==='dashboard'" class="card">
       <h2>Dashboard</h2>
       <p v-if="!store.state.session" class="muted">Please log in.</p>
@@ -136,7 +136,6 @@ function logout(){
 </script>
 
 <style>
-/* 基础样式（沿用你的浅色变量） */
 .wrap{max-width:1100px;margin:0 auto;padding:16px}
 header.bar{
   position:sticky;top:0;z-index:10;
@@ -152,7 +151,7 @@ header.bar{
 .btn.danger{background:var(--danger);color:#fff;border:none}
 .pill{display:inline-flex;gap:6px;align-items:center;padding:4px 8px;border-radius:999px;background:#f2f2f2;border:1px solid #ccc;font-size:12px}
 
-/* Hero 专用样式 */
+/* Hero */
 .hero{
   overflow:hidden;
   padding:28px;

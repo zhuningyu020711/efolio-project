@@ -2,19 +2,18 @@
 import { reactive, computed } from 'vue'
 import { sanitize } from './sanitize'
 
-// ===== LocalStorage keys (bump version to force fresh seed when needed) =====
+// ---- LocalStorage keys（升到 v2，避开旧空数组）----
 const USERS_KEY   = 'app_users_v1'
 const SESSION_KEY = 'app_session_v1'
-const ITEMS_KEY   = 'app_items_v2'   // <- 升级为 v2，避免读取到旧的空数组
+const ITEMS_KEY   = 'app_items_v2'
 
-// ===== Helpers =====
+// ---- Helpers ----
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36)
 const LS = {
   get(k, fb){ try { return JSON.parse(localStorage.getItem(k)) ?? fb } catch { return fb } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) }
 }
 
-// SHA-256 -> hex
 async function sha256Hex(str){
   const enc  = new TextEncoder().encode(str)
   const buf  = await crypto.subtle.digest('SHA-256', enc)
@@ -22,7 +21,6 @@ async function sha256Hex(str){
   return arr.map(b => b.toString(16).padStart(2,'0')).join('')
 }
 
-// 默认演示数据
 function defaultItems(){
   return [
     { id: uid(), title:'Intro to Vue 3',         category:'Course',   description:'Build reactive UIs with the Composition API.', reviews:[] },
@@ -31,28 +29,20 @@ function defaultItems(){
   ]
 }
 
-// ===== Seed admin + items (robust) =====
+// ---- Seed（稳妥播种）----
 function seed(){
   // admin
   const users = LS.get(USERS_KEY, [])
   if (!users.some(u => u.email === 'admin@demo.local')){
     const salt = uid()
-    const admin = {
-      id: uid(),
-      displayName: 'Administrator',
-      email: 'admin@demo.local',
-      role: 'admin',
-      salt,
-      passwordHash: ''
-    }
+    const admin = { id: uid(), displayName:'Administrator', email:'admin@demo.local', role:'admin', salt, passwordHash:'' }
     sha256Hex('Admin123!' + salt).then(hash => {
       admin.passwordHash = hash
       users.push(admin)
       LS.set(USERS_KEY, users)
     })
   }
-
-  // items：当不存在、不是数组、或为空数组时都重播种
+  // items
   const existing = LS.get(ITEMS_KEY, null)
   if (!Array.isArray(existing) || existing.length === 0){
     LS.set(ITEMS_KEY, defaultItems())
@@ -60,28 +50,31 @@ function seed(){
 }
 seed()
 
-// ===== Global state =====
+// ---- Global state ----
 const state = reactive({
   users:   LS.get(USERS_KEY, []),
   session: LS.get(SESSION_KEY, null),
   items:   LS.get(ITEMS_KEY, []),
 })
 
-// ===== Computed =====
+// ✅ 二次兜底（即使前面因为某些原因读到了空，这里也会立刻填上）
+if (!Array.isArray(state.items) || state.items.length === 0){
+  state.items = defaultItems()
+  LS.set(ITEMS_KEY, state.items)
+}
+
+// ---- Computed ----
 const isAdmin = computed(() => state.session && state.session.role === 'admin')
 
-// ===== Persist =====
+// ---- Persist ----
 function saveAll(){
   LS.set(USERS_KEY, state.users)
   LS.set(SESSION_KEY, state.session)
   LS.set(ITEMS_KEY, state.items)
 }
 
-// ===== Auth =====
-function logout(){
-  state.session = null
-  saveAll()
-}
+// ---- Auth ----
+function logout(){ state.session = null; saveAll() }
 
 async function register({ displayName, email, password }){
   const name = sanitize((displayName||'').trim())
@@ -105,16 +98,14 @@ async function login({ email, password }){
   const mail = sanitize((email||'').trim().toLowerCase())
   const user = state.users.find(u => u.email === mail)
   if (!user) throw new Error('Invalid credentials')
-
   const hash = await sha256Hex(password + user.salt)
   if (hash !== user.passwordHash) throw new Error('Invalid credentials')
-
   state.session = { id:user.id, displayName:user.displayName, email:user.email, role:user.role }
   saveAll()
   return state.session
 }
 
-// ===== Items management =====
+// ---- Items ----
 function addItem({ title, category, description }){
   if (!isAdmin.value) throw new Error('Admins only')
   const t = sanitize((title||'').trim())
@@ -122,9 +113,7 @@ function addItem({ title, category, description }){
   const d = sanitize((description||'').trim())
   if (t.length<3 || c.length<3 || d.length<10) throw new Error('Please complete all fields')
   const it = { id: uid(), title:t, category:c, description:d, reviews:[] }
-  state.items.unshift(it)
-  saveAll()
-  return it
+  state.items.unshift(it); saveAll(); return it
 }
 function removeItem(id){
   if (!isAdmin.value) throw new Error('Admins only')
@@ -132,11 +121,9 @@ function removeItem(id){
   if (i>=0){ state.items.splice(i,1); saveAll() }
 }
 
-// ===== Reviews =====
-function avgRating(item){
-  if (!item.reviews.length) return 0
-  return item.reviews.reduce((a,b)=>a + (b.rating||0), 0) / item.reviews.length
-}
+// ---- Reviews ----
+function avgRating(item){ return !item.reviews.length ? 0 :
+  item.reviews.reduce((a,b)=>a + (b.rating||0), 0) / item.reviews.length }
 function submitReview(itemId, { rating, comment }){
   if (!state.session) throw new Error('Login required')
   const item = state.items.find(x=>x.id===itemId)
@@ -150,76 +137,44 @@ function submitReview(itemId, { rating, comment }){
 }
 function userReviews(){
   if (!state.session) return []
-  return state.items
-    .flatMap(it=>it.reviews)
-    .filter(r=>r.byId === state.session.id)
-    .sort((a,b)=>b.createdAt - a.createdAt)
+  return state.items.flatMap(it=>it.reviews).filter(r=>r.byId===state.session.id).sort((a,b)=>b.createdAt-a.createdAt)
 }
 
-// ===== External JSON -> items (dynamic data) =====
+// ---- External JSON（可选动态扩展）----
 async function loadExternalData(){
-  // 已加载过（带 _source 标记）则不重复
   if (state.items.some(it => it._source === 'json')) return
-
   const authorsUrl = new URL('../assets/json/authors.json', import.meta.url)
   const storesUrl  = new URL('../assets/json/bookstores.json', import.meta.url)
-
   const [authors, bookstores] = await Promise.all([
     fetch(authorsUrl).then(r => r.json()).catch(() => []),
     fetch(storesUrl).then(r => r.json()).catch(() => []),
   ])
-
-  const authorItems = mapRecordsToItems(authors, 'Authors')
-  const storeItems  = mapRecordsToItems(bookstores, 'Bookstores')
-
-  state.items = [...authorItems, ...storeItems, ...state.items]
+  const pack = (records, category) => Array.isArray(records) ? records.map(rec => ({
+    id: uid(),
+    title: sanitize(String(rec?.name || rec?.title || rec?.id || 'Record')),
+    category,
+    description: sanitize(Object.entries(rec||{}).slice(0,4).map(([k,v])=>{
+      const val = typeof v==='object' ? JSON.stringify(v) : String(v); return `${k}: ${val}`
+    }).join(' • ') || `${category} item`),
+    reviews: [],
+    _source: 'json',
+  })) : []
+  state.items = [...pack(authors,'Authors'), ...pack(bookstores,'Bookstores'), ...state.items]
   LS.set(ITEMS_KEY, state.items)
 }
 
-function mapRecordsToItems(records, category){
-  if (!Array.isArray(records)) return []
-  return records.map(rec => {
-    const title =
-      (rec && (rec.name || rec.title || rec.id)) ?
-      String(rec.name || rec.title || rec.id) : 'Record'
+// ---- Dev helper ----
+function resetItems(){ state.items = defaultItems(); saveAll() }
 
-    const pairs = Object.entries(rec || {}).slice(0, 4).map(([k, v]) => {
-      const val = typeof v === 'object' ? JSON.stringify(v) : String(v)
-      return `${k}: ${val}`
-    })
-    const desc = sanitize(pairs.join(' • '))
-
-    return {
-      id: uid(),
-      title: sanitize(title),
-      category,
-      description: desc || `${category} item`,
-      reviews: [],
-      _source: 'json',
-    }
-  })
-}
-
-// ===== Dev helper: reset demo data =====
-function resetItems(){
-  state.items = defaultItems()
-  saveAll()
-}
-
-// ===== Export store =====
+// ---- Export ----
 export function useStore(){
   return {
     state,
     isAdmin,
-    register,
-    login,
-    logout,
-    addItem,
-    removeItem,
-    submitReview,
-    avgRating,
-    userReviews,
+    register, login, logout,
+    addItem, removeItem,
+    submitReview, avgRating, userReviews,
     loadExternalData,
-    resetItems,     // 可选：开发期一键重置
+    resetItems,
   }
 }
