@@ -165,6 +165,35 @@ async function loadExternalData(){
 
 // ---- Dev helper ----
 function resetItems(){ state.items = defaultItems(); saveAll() }
+// 在 useStore.js 里现有的函数下面，新增：
+function setSession(sess){
+  state.session = sess
+  // 可选：如果你希望 admin 账号出现在 users 列表中，追加一份（不影响 Firebase）
+  // if (!state.users.some(u => u.id === sess.id)) {
+  //   state.users.push({ id:sess.id, displayName:sess.displayName, email:sess.email, role:sess.role, salt:'', passwordHash:'' })
+  // }
+  saveAll()
+}
+function clearSession(){
+  state.session = null
+  saveAll()
+}
+
+// 并确保在 export 里把它们导出去：
+export function useStore(){
+  return {
+    state,
+    isAdmin,
+    register, login, logout,   // 本地版保留无妨（以防老师看代码）
+    addItem, removeItem,
+    submitReview, avgRating, userReviews,
+    loadExternalData, resetItems,
+
+    // ✅ 新增导出
+    setSession, clearSession,
+  }
+}
+
 
 // ---- Export ----
 export function useStore(){
