@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@emailjs/browser": "^4.4.1",
     "@mapbox/mapbox-gl-geocoder": "^5.1.2",
     "@primevue/themes": "^4.4.1",
     "@turf/turf": "^7.2.0",

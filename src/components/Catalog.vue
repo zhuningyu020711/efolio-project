@@ -1,158 +1,92 @@
 <template>
-  <section class="card">
-    <h3 class="mb-2">Catalog</h3>
-
-    <!-- 筛选区 -->
-    <div class="filters">
-      <div class="row">
-        <label class="cell">
-          <span>Global</span>
-          <InputText v-model="q.global" placeholder="Search all…" />
-        </label>
-
-        <label class="cell">
-          <span>Title</span>
-          <InputText v-model="q.title" placeholder="Title…" />
-        </label>
-
-        <label class="cell">
-          <span>Category</span>
-          <InputText v-model="q.category" placeholder="Category…" />
-        </label>
-      </div>
-
-      <div class="row">
-        <label class="cell">
-          <span>Price Min</span>
-          <InputText v-model.number="q.priceMin" type="number" placeholder="min" />
-        </label>
-        <label class="cell">
-          <span>Price Max</span>
-          <InputText v-model.number="q.priceMax" type="number" placeholder="max" />
-        </label>
-
-        <label class="cell">
-          <span>Rating Min</span>
-          <InputText v-model.number="q.ratingMin" type="number" placeholder="0–5" />
-        </label>
-        <label class="cell">
-          <span>Rating Max</span>
-          <InputText v-model.number="q.ratingMax" type="number" placeholder="0–5" />
-        </label>
-
-        <button class="btn" @click="resetFilters">Reset</button>
-      </div>
+  <section>
+    <div class="inline" role="search">
+      <label for="q">Search</label>
+      <input id="q" v-model.trim="q" placeholder="Search title…" @input="pageIndex=0" />
     </div>
 
-    <!-- 表格 -->
-    <DataTable
-      :value="filteredItems"
-      dataKey="id"
-      paginator
-      :rows="10"
-      :rowsPerPageOptions="[10,20,50]"
-      removableSort
-      responsiveLayout="scroll"
-      :emptyMessage="'No items found'"
-    >
-      <Column field="title" header="Title" sortable />
-      <Column field="category" header="Category" sortable />
-      <Column header="Avg Rating" sortable :sortFunction="sortByAvg">
-        <template #body="slotProps">{{ avg(slotProps.data).toFixed(1) }}</template>
-      </Column>
-      <Column header="Reviews" :body="it => (it.reviews?.length || 0)" sortable />
-      <Column field="price" header="Price" sortable>
-        <template #body="slotProps">{{ formatPrice(slotProps.data.price) }}</template>
-      </Column>
-    </DataTable>
+    <table class="table" aria-describedby="tblHelp">
+      <caption id="tblHelp" class="sr-only">Sortable catalog table with pagination</caption>
+      <thead>
+        <tr>
+          <th scope="col">
+            <button type="button" class="linklike"
+              :aria-sort="ariaSort('title')" @click="toggleSort('title')">
+              Title <span class="sr-only" v-if="sort.key==='title'">({{ sort.order }})</span>
+            </button>
+          </th>
+          <th scope="col">
+            <button type="button" class="linklike"
+              :aria-sort="ariaSort('price')" @click="toggleSort('price')">
+              Price <span class="sr-only" v-if="sort.key==='price'">({{ sort.order }})</span>
+            </button>
+          </th>
+          <th scope="col">Rating</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="it in pageItems" :key="it.id">
+          <th scope="row">{{ it.title }}</th>
+          <td>${{ it.price.toFixed(2) }}</td>
+          <td>{{ it.rating ?? '-' }}</td>
+        </tr>
+        <tr v-if="pageItems.length===0"><td colspan="3">No results.</td></tr>
+      </tbody>
+    </table>
+
+    <nav class="pagination" aria-label="Pagination">
+      <button type="button" class="btn" :disabled="pageIndex===0" @click="pageIndex--">Previous</button>
+      <button
+        v-for="n in totalPages" :key="n" type="button" class="btn"
+        :aria-current="pageIndex===n-1 ? 'page' : null" @click="pageIndex=n-1">
+        {{ n }}
+      </button>
+      <button type="button" class="btn" :disabled="pageIndex===totalPages-1" @click="pageIndex++">Next</button>
+    </nav>
   </section>
 </template>
 
 <script setup>
-import { computed, reactive } from 'vue'
+import { computed, ref } from 'vue'
 import { useStore } from '../utils/useStore'
-import DataTable from 'primevue/datatable'
-import Column from 'primevue/column'
-import InputText from 'primevue/inputtext'
-
 const store = useStore()
-const items = computed(() => store.state.items || [])
 
-// 筛选条件
-const q = reactive({
-  global: '',
-  title: '',
-  category: '',
-  priceMin: null,
-  priceMax: null,
-  ratingMin: null,
-  ratingMax: null
+const q = ref('')
+const sort = ref({ key: 'title', order: 'asc' })
+const pageIndex = ref(0)
+const pageSize = 10
+
+const items = computed(() => (store.state.items || []).map(it => ({
+  id: it.id, title: it.title || it.name || 'Untitled',
+  price: Number(it.price ?? 0),
+  rating: Number(it.rating ?? (it.reviews?.[0]?.rating ?? NaN))
+})))
+
+const filtered = computed(() => {
+  const s = q.value.toLowerCase()
+  const arr = s ? items.value.filter(i => i.title.toLowerCase().includes(s)) : items.value.slice()
+  const { key, order } = sort.value
+  arr.sort((a,b) => (a[key] ?? 0) - (b[key] ?? 0))
+  if (order==='desc') arr.reverse()
+  return arr
 })
+const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize)))
+const pageItems = computed(() => filtered.value.slice(pageIndex.value * pageSize, (pageIndex.value+1)*pageSize))
 
-function resetFilters(){
-  q.global = q.title = q.category = ''
-  q.priceMin = q.priceMax = q.ratingMin = q.ratingMax = null
+function toggleSort(key){
+  if (sort.value.key === key){ sort.value.order = (sort.value.order === 'asc' ? 'desc':'asc') }
+  else { sort.value.key = key; sort.value.order = 'asc' }
 }
-
-function avg(it){
-  const arr = it.reviews || []
-  if (!arr.length) return 0
-  return arr.reduce((s,r)=>s+(Number(r.rating)||0),0)/arr.length
+function ariaSort(key){
+  if (sort.value.key !== key) return 'none'
+  return sort.value.order === 'asc' ? 'ascending' : 'descending'
 }
-
-function formatPrice(p){
-  if (p == null || p === '') return '-'
-  const n = Number(p)
-  return isNaN(n) ? '-' : `$${n.toFixed(2)}`
-}
-
-// 排序：按平均分
-function sortByAvg(ev){
-  const dir = ev.order // 1 asc, -1 desc
-  ev.data.sort((a,b) => (avg(a)-avg(b)) * dir)
-}
-
-// 文本包含判断（大小写不敏感）
-const contains = (source, needle) =>
-  String(source ?? '').toLowerCase().includes(String(needle ?? '').toLowerCase())
-
-// 组合筛选（全局 / 列 / 区间）
-const filteredItems = computed(() => {
-  return (items.value || []).filter(it => {
-    const t = it.title ?? ''
-    const c = it.category ?? ''
-    const p = it.price != null ? Number(it.price) : null
-    const r = avg(it)
-
-    // 全局（命中任一字段即可）
-    if (q.global) {
-      const hit = contains(t, q.global) || contains(c, q.global) ||
-                  contains(formatPrice(p), q.global) || String(r).includes(q.global)
-      if (!hit) return false
-    }
-
-    // 列筛选
-    if (q.title && !contains(t, q.title)) return false
-    if (q.category && !contains(c, q.category)) return false
-
-    // 价格区间
-    if (q.priceMin != null && !(p != null && p >= q.priceMin)) return false
-    if (q.priceMax != null && !(p != null && p <= q.priceMax)) return false
-
-    // 评分区间
-    if (q.ratingMin != null && !(r >= q.ratingMin)) return false
-    if (q.ratingMax != null && !(r <= q.ratingMax)) return false
-
-    return true
-  })
-})
 </script>
 
 <style scoped>
-.card{background:#fff;border:1px solid #ddd;border-radius:12px;padding:16px}
-.filters{display:grid;gap:10px;margin-bottom:10px}
-.row{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));align-items:end}
-.cell{display:flex;flex-direction:column;gap:6px}
-.mb-2{margin-bottom:12px}
-.btn{border:1px solid #ccc;background:#f0f0f0;color:#222;border-radius:8px;padding:8px 12px;cursor:pointer}
+.table{ width:100%; border-collapse:collapse; }
+.table th,.table td{ border:1px solid #e5e7eb; padding:8px; text-align:left; }
+.linklike{ background:none; border:none; color:#1d4ed8; cursor:pointer; text-decoration:underline; }
+.pagination{ display:flex; gap:6px; align-items:center; margin-top:10px; flex-wrap:wrap; }
+.inline{ display:flex; gap:8px; align-items:center; margin-bottom:10px; }
 </style>

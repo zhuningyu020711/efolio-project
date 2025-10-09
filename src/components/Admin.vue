@@ -1,148 +1,94 @@
 <template>
-  <section class="card">
-    <h3 class="mb-2">All Items (Admin)</h3>
+  <section>
+    <h2 class="sr-only" id="admin-table">Admin Items</h2>
 
-    <!-- 筛选区 -->
-    <div class="filters">
-      <div class="row">
-        <label class="cell">
-          <span>Global</span>
-          <InputText v-model="q.global" placeholder="Search all…" />
-        </label>
-        <label class="cell">
-          <span>Title</span>
-          <InputText v-model="q.title" placeholder="Title…" />
-        </label>
-        <label class="cell">
-          <span>Category</span>
-          <InputText v-model="q.category" placeholder="Category…" />
-        </label>
-      </div>
-
-      <div class="row">
-        <label class="cell">
-          <span>Price Min</span>
-          <InputText v-model.number="q.priceMin" type="number" placeholder="min" />
-        </label>
-        <label class="cell">
-          <span>Price Max</span>
-          <InputText v-model.number="q.priceMax" type="number" placeholder="max" />
-        </label>
-        <label class="cell">
-          <span>Rating Min</span>
-          <InputText v-model.number="q.ratingMin" type="number" placeholder="0–5" />
-        </label>
-        <label class="cell">
-          <span>Rating Max</span>
-          <InputText v-model.number="q.ratingMax" type="number" placeholder="0–5" />
-        </label>
-
-        <button class="btn" @click="resetFilters">Reset</button>
-      </div>
+    <div class="inline">
+      <label for="minPrice">Min price</label>
+      <input id="minPrice" type="number" min="0" v-model.number="minPrice" @input="pageIndex=0" />
+      <label for="minRating">Min rating</label>
+      <input id="minRating" type="number" min="0" max="5" step="0.5" v-model.number="minRating" @input="pageIndex=0" />
     </div>
 
-    <DataTable
-      :value="filteredItems"
-      dataKey="id"
-      paginator
-      :rows="10"
-      :rowsPerPageOptions="[10,20,50]"
-      removableSort
-      responsiveLayout="scroll"
-      :emptyMessage="'No items found'"
-    >
-      <Column field="title" header="Title" sortable />
-      <Column field="category" header="Category" sortable />
-      <Column header="Avg" sortable :sortFunction="sortByAvg">
-        <template #body="slotProps">{{ avg(slotProps.data).toFixed(1) }}</template>
-      </Column>
-      <Column header="Reviews" :body="it => (it.reviews?.length || 0)" sortable />
-      <Column field="price" header="Price" sortable>
-        <template #body="slotProps">{{ formatPrice(slotProps.data.price) }}</template>
-      </Column>
-      <Column header="Actions" style="width:140px">
-        <template #body="slotProps">
-          <button class="btn danger" @click="onDelete(slotProps.data)">Delete</button>
-        </template>
-      </Column>
-    </DataTable>
+    <table class="table" aria-labelledby="admin-table">
+      <thead>
+        <tr>
+          <th scope="col">ID</th>
+          <th scope="col">
+            <button type="button" class="linklike"
+              :aria-sort="ariaSort('price')" @click="toggleSort('price')">Price</button>
+          </th>
+          <th scope="col">
+            <button type="button" class="linklike"
+              :aria-sort="ariaSort('rating')" @click="toggleSort('rating')">Rating</button>
+          </th>
+          <th scope="col">Title</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="it in pageItems" :key="it.id">
+          <th scope="row">{{ it.id }}</th>
+          <td>${{ it.price.toFixed(2) }}</td>
+          <td>{{ isNaN(it.rating) ? '-' : it.rating }}</td>
+          <td>{{ it.title }}</td>
+        </tr>
+        <tr v-if="pageItems.length===0"><td colspan="4">No results.</td></tr>
+      </tbody>
+    </table>
+
+    <nav class="pagination" aria-label="Pagination">
+      <button type="button" class="btn" :disabled="pageIndex===0" @click="pageIndex--">Previous</button>
+      <button
+        v-for="n in totalPages" :key="n" type="button" class="btn"
+        :aria-current="pageIndex===n-1 ? 'page' : null" @click="pageIndex=n-1">
+        {{ n }}
+      </button>
+      <button type="button" class="btn" :disabled="pageIndex===totalPages-1" @click="pageIndex++">Next</button>
+    </nav>
   </section>
 </template>
 
 <script setup>
-import { computed, reactive } from 'vue'
+import { ref, computed } from 'vue'
 import { useStore } from '../utils/useStore'
-import DataTable from 'primevue/datatable'
-import Column from 'primevue/column'
-import InputText from 'primevue/inputtext'
-
 const store = useStore()
-const items = computed(() => store.state.items || [])
 
-const q = reactive({
-  global: '',
-  title: '',
-  category: '',
-  priceMin: null,
-  priceMax: null,
-  ratingMin: null,
-  ratingMax: null
-})
-function resetFilters(){
-  q.global = q.title = q.category = ''
-  q.priceMin = q.priceMax = q.ratingMin = q.ratingMax = null
-}
-function avg(it){
-  const arr = it.reviews || []
-  if (!arr.length) return 0
-  return arr.reduce((s,r)=>s+(Number(r.rating)||0),0)/arr.length
-}
-function formatPrice(p){
-  if (p == null || p === '') return '-'
-  const n = Number(p)
-  return isNaN(n) ? '-' : `$${n.toFixed(2)}`
-}
-function sortByAvg(ev){
-  const dir = ev.order
-  ev.data.sort((a,b) => (avg(a)-avg(b)) * dir)
-}
-const contains = (source, needle) =>
-  String(source ?? '').toLowerCase().includes(String(needle ?? '').toLowerCase())
+const minPrice = ref(0)
+const minRating = ref(0)
+const sort = ref({ key: 'price', order: 'asc' })
+const pageIndex = ref(0)
+const pageSize = 10
 
-const filteredItems = computed(() => {
-  return (items.value || []).filter(it => {
-    const t = it.title ?? ''
-    const c = it.category ?? ''
-    const p = it.price != null ? Number(it.price) : null
-    const r = avg(it)
+const items = computed(() => (store.state.items || []).map(it => ({
+  id: it.id, title: it.title || it.name || 'Untitled',
+  price: Number(it.price ?? 0),
+  rating: Number(it.rating ?? (it.reviews?.[0]?.rating ?? NaN))
+})))
 
-    if (q.global) {
-      const hit = contains(t, q.global) || contains(c, q.global) ||
-                  contains(formatPrice(p), q.global) || String(r).includes(q.global)
-      if (!hit) return false
-    }
-    if (q.title && !contains(t, q.title)) return false
-    if (q.category && !contains(c, q.category)) return false
-    if (q.priceMin != null && !(p != null && p >= q.priceMin)) return false
-    if (q.priceMax != null && !(p != null && p <= q.priceMax)) return false
-    if (q.ratingMin != null && !(r >= q.ratingMin)) return false
-    if (q.ratingMax != null && !(r <= q.ratingMax)) return false
-    return true
-  })
+const filtered = computed(() => {
+  const arr = items.value.filter(i => i.price >= (minPrice.value||0) && (isNaN(i.rating) ? true : i.rating >= (minRating.value||0)))
+  const { key, order } = sort.value
+  arr.sort((a,b) => (a[key] ?? 0) - (b[key] ?? 0))
+  if (order==='desc') arr.reverse()
+  return arr
 })
 
-function onDelete(row){
-  if (!confirm(`Delete "${row.title}" ?`)) return
-  if (store.del) store.del(row.id)   // 按你的 store 实现对接
+const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize)))
+const pageItems = computed(() => filtered.value.slice(pageIndex.value * pageSize, (pageIndex.value+1)*pageSize))
+
+function toggleSort(key){
+  if (sort.value.key === key){ sort.value.order = (sort.value.order === 'asc' ? 'desc':'asc') }
+  else { sort.value.key = key; sort.value.order = 'asc' }
+}
+function ariaSort(key){
+  if (sort.value.key !== key) return 'none'
+  return sort.value.order === 'asc' ? 'ascending' : 'descending'
 }
 </script>
 
 <style scoped>
-.card{background:#fff;border:1px solid #ddd;border-radius:12px;padding:16px}
-.filters{display:grid;gap:10px;margin-bottom:10px}
-.row{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));align-items:end}
-.cell{display:flex;flex-direction:column;gap:6px}
-.mb-2{margin-bottom:12px}
-.btn{border:1px solid #ccc;background:#f0f0f0;color:#222;border-radius:8px;padding:6px 10px;cursor:pointer}
-.btn.danger{background:#ef4444;color:#fff;border:none}
+.table{ width:100%; border-collapse:collapse; }
+.table th,.table td{ border:1px solid #e5e7eb; padding:8px; text-align:left; }
+.linklike{ background:none; border:none; color:#1d4ed8; cursor:pointer; text-decoration:underline; }
+.pagination{ display:flex; gap:6px; align-items:center; margin-top:10px; flex-wrap:wrap; }
+.inline{ display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
 </style>

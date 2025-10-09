@@ -2,11 +2,27 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>efolio-project</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <title>Campus Event Management</title>
   </head>
   <body>
+    <!-- Skip to content：Tab 一下即可跳过顶部导航 -->
+    <a href="#main" class="skip-link">Skip to main content</a>
+
     <div id="app"></div>
     <script type="module" src="/src/main.js"></script>
+
+    <style>
+      .skip-link{
+        position:absolute;left:8px;top:8px;z-index:10000;
+        background:#111;color:#fff;padding:8px 12px;border-radius:8px;
+        transform:translateY(-150%);transition:transform .15s ease;
+      }
+      .skip-link:focus{transform:translateY(0)}
+    </style>
   </body>
 </html>
