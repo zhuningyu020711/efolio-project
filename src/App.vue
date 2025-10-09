@@ -5,6 +5,7 @@
       <button class="btn" @click="page='home'">Home</button>
       <button class="btn" @click="page='catalog'">Catalog</button>
       <button class="btn" @click="page='email'">Email</button>
+      <button class="btn" @click="page='serverless'">Serverless</button>
       <button class="btn" v-if="!store.state.session" @click="page='auth'">Login / Register</button>
       <button class="btn" v-if="store.state.session" @click="page='dashboard'">Dashboard</button>
       <button class="btn" v-if="isAdmin" @click="page='admin'">Admin</button>
@@ -18,27 +19,33 @@
     <section v-if="page==='home'" class="card">
       <h2>Welcome</h2>
       <p class="muted">
-        This is a demo app for your assignment. Use the top navigation to try
-        <strong>Catalog</strong>, <strong>Email</strong>, <strong>Admin</strong> and <strong>Dashboard</strong>.
+        Use the navigation to open <strong>Catalog</strong>, <strong>Email</strong>, <strong>Serverless</strong>, <strong>Admin</strong>, and <strong>Dashboard</strong>.
       </p>
       <ul>
-        <li>✅ Firebase Auth 已完成（你已实现）</li>
-        <li>✅ Email（SendGrid + Cloud Functions）— 见 <em>Email</em> 栏</li>
-        <li>✅ 交互表格（Admin / Catalog 使用 DataTable 可做 D.3）</li>
-        <li>☁️ 部署（D.4）推荐 Cloudflare Pages / Firebase Hosting</li>
+        <li>✅ Firebase Auth</li>
+        <li>✅ Email via EmailJS (no backend keys in frontend)</li>
+        <li>✅ Interactive Tables (Admin / Catalog) with filters & pagination</li>
+        <li>✅ Serverless aggregation with Cloudflare Workers</li>
+        <li>☁️ Deployed on Cloudflare Pages</li>
       </ul>
     </section>
 
-    <!-- Catalog（你的列表页，可改造成 DataTable） -->
+    <!-- Catalog -->
     <section v-else-if="page==='catalog'" class="card">
       <h2>Catalog</h2>
       <Catalog />
     </section>
 
-    <!-- Email（新页） -->
+    <!-- Email -->
     <section v-else-if="page==='email'" class="card">
       <h2>Email</h2>
       <Email />
+    </section>
+
+    <!-- Serverless -->
+    <section v-else-if="page==='serverless'" class="card">
+      <h2>Serverless</h2>
+      <ServerlessDemo />
     </section>
 
     <!-- Auth -->
@@ -92,35 +99,30 @@
 import { ref, computed } from 'vue'
 import { useStore } from './utils/useStore'
 
-// 组件
+// 现有组件
 import Auth from './components/Auth.vue'
 import Admin from './components/Admin.vue'
 import Catalog from './components/Catalog.vue'
 import Email from './components/Email.vue'
 
+// 新增的 Serverless 演示页
+import ServerlessDemo from './components/ServerlessDemo.vue'
+
 const store = useStore()
 const page = ref('home')
-
-// isAdmin：你的 useStore.js 已经暴露 computed，直接用即可
 const isAdmin = store.isAdmin
 
-// 个人评论（假设 useStore 有 userReviews()）
 const myReviews = computed(() => {
   try { return store.userReviews?.() || [] } catch { return [] }
 })
 
-// 找 item（为了在 Dashboard 里显示标题）
 function findItem(id){
   try { return (store.state.items || []).find(it => it.id === id) } catch { return null }
 }
-
 function resetData(){
-  // 你的 useStore 里有 resetItems() / loadExternalData()；这里优先 resetItems
   if (store.resetItems) store.resetItems()
-  // 如果有“加载样例数据”的函数，可以顺便触发
   if (store.loadExternalData) store.loadExternalData()
 }
-
 function onLogout(){
   if (store.logout) store.logout()
 }
@@ -132,7 +134,6 @@ function onLogout(){
   --text:#222; --muted:#6b7280; --panel:#fff;
 }
 *{box-sizing:border-box}
-body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
 .wrap{max-width:1100px;margin:24px auto;padding:0 16px}
 .bar{
   position:sticky;top:0;z-index:10;background:#ffffffee;
@@ -144,8 +145,9 @@ body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,
 .hstack{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .card{background:var(--panel);border:1px solid #ddd;border-radius:12px;padding:16px;
   box-shadow:0 4px 10px rgba(0,0,0,0.08)}
-.muted{color:var(--muted)} .note{color:var(--muted);font-size:14px}
-.inline{display:flex;gap:10px;align-items:center} .grid{display:grid;gap:12px}
+.muted{color:var(--muted)}
+.inline{display:flex;gap:10px;align-items:center}
+.grid{display:grid;gap:12px}
 .btn{border:1px solid #ccc;background:#f0f0f0;color:var(--text);border-radius:8px;padding:8px 14px;cursor:pointer}
 .btn.primary{background:var(--brand);color:#fff;border:none}
 .btn.success{background:var(--accent);color:#fff;border:none}
