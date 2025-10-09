@@ -1,83 +1,148 @@
 <template>
-    <div class="card">
-      <h2>Admin Panel</h2>
-      <p v-if="!isAdmin" class="error">Admins only.</p>
-  
-      <div v-else class="grid">
-        <form class="grid card" @submit.prevent="add" novalidate>
-          <h3>Add new item</h3>
-  
-          <label>Title
-            <input class="input" v-model.trim="item.title" required minlength="3" maxlength="80" />
-          </label>
-  
-          <label>Category
-            <input class="input" v-model.trim="item.category" required minlength="3" maxlength="40" />
-          </label>
-  
-          <label>Description
-            <textarea class="input" rows="2" v-model.trim="item.description" required minlength="10" maxlength="200"></textarea>
-          </label>
-  
-          <button class="btn success">Add item</button>
-        </form>
-  
-        <div class="card">
-          <h3>All items</h3>
-          <table class="table">
-            <thead>
-              <tr><th>Title</th><th>Category</th><th>Reviews</th><th>Avg</th><th></th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="it in items" :key="it.id">
-                <td>{{ it.title }}</td>
-                <td>{{ it.category }}</td>
-                <td>{{ it.reviews.length }}</td>
-                <td>{{ avg(it).toFixed(1) }}</td>
-                <td><button class="btn danger" @click="del(it.id)">Delete</button></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+  <section class="card">
+    <h3 class="mb-2">All Items (Admin)</h3>
+
+    <!-- 筛选区 -->
+    <div class="filters">
+      <div class="row">
+        <label class="cell">
+          <span>Global</span>
+          <InputText v-model="q.global" placeholder="Search all…" />
+        </label>
+        <label class="cell">
+          <span>Title</span>
+          <InputText v-model="q.title" placeholder="Title…" />
+        </label>
+        <label class="cell">
+          <span>Category</span>
+          <InputText v-model="q.category" placeholder="Category…" />
+        </label>
+      </div>
+
+      <div class="row">
+        <label class="cell">
+          <span>Price Min</span>
+          <InputText v-model.number="q.priceMin" type="number" placeholder="min" />
+        </label>
+        <label class="cell">
+          <span>Price Max</span>
+          <InputText v-model.number="q.priceMax" type="number" placeholder="max" />
+        </label>
+        <label class="cell">
+          <span>Rating Min</span>
+          <InputText v-model.number="q.ratingMin" type="number" placeholder="0–5" />
+        </label>
+        <label class="cell">
+          <span>Rating Max</span>
+          <InputText v-model.number="q.ratingMax" type="number" placeholder="0–5" />
+        </label>
+
+        <button class="btn" @click="resetFilters">Reset</button>
       </div>
     </div>
-  </template>
-  
-  <script setup>
-  import { reactive, computed } from 'vue'
-  import { useStore } from '../utils/useStore'
-  
-  const store = useStore()
-  const isAdmin = computed(() => store.isAdmin.value)
-  const items = computed(() => store.state.items)
-  
-  const item = reactive({ title:'', category:'', description:'' })
-  const avg = (it) => store.avgRating(it)
-  
-  function add(){
-    try{
-      store.addItem(item)
-      item.title = item.category = item.description = ''
-    }catch(e){ alert(e.message) }
-  }
-  
-  function del(id){
-    if (confirm('Delete this item?')){
-      try{ store.removeItem(id) }catch(e){ alert(e.message) }
+
+    <DataTable
+      :value="filteredItems"
+      dataKey="id"
+      paginator
+      :rows="10"
+      :rowsPerPageOptions="[10,20,50]"
+      removableSort
+      responsiveLayout="scroll"
+      :emptyMessage="'No items found'"
+    >
+      <Column field="title" header="Title" sortable />
+      <Column field="category" header="Category" sortable />
+      <Column header="Avg" sortable :sortFunction="sortByAvg">
+        <template #body="slotProps">{{ avg(slotProps.data).toFixed(1) }}</template>
+      </Column>
+      <Column header="Reviews" :body="it => (it.reviews?.length || 0)" sortable />
+      <Column field="price" header="Price" sortable>
+        <template #body="slotProps">{{ formatPrice(slotProps.data.price) }}</template>
+      </Column>
+      <Column header="Actions" style="width:140px">
+        <template #body="slotProps">
+          <button class="btn danger" @click="onDelete(slotProps.data)">Delete</button>
+        </template>
+      </Column>
+    </DataTable>
+  </section>
+</template>
+
+<script setup>
+import { computed, reactive } from 'vue'
+import { useStore } from '../utils/useStore'
+import DataTable from 'primevue/datatable'
+import Column from 'primevue/column'
+import InputText from 'primevue/inputtext'
+
+const store = useStore()
+const items = computed(() => store.state.items || [])
+
+const q = reactive({
+  global: '',
+  title: '',
+  category: '',
+  priceMin: null,
+  priceMax: null,
+  ratingMin: null,
+  ratingMax: null
+})
+function resetFilters(){
+  q.global = q.title = q.category = ''
+  q.priceMin = q.priceMax = q.ratingMin = q.ratingMax = null
+}
+function avg(it){
+  const arr = it.reviews || []
+  if (!arr.length) return 0
+  return arr.reduce((s,r)=>s+(Number(r.rating)||0),0)/arr.length
+}
+function formatPrice(p){
+  if (p == null || p === '') return '-'
+  const n = Number(p)
+  return isNaN(n) ? '-' : `$${n.toFixed(2)}`
+}
+function sortByAvg(ev){
+  const dir = ev.order
+  ev.data.sort((a,b) => (avg(a)-avg(b)) * dir)
+}
+const contains = (source, needle) =>
+  String(source ?? '').toLowerCase().includes(String(needle ?? '').toLowerCase())
+
+const filteredItems = computed(() => {
+  return (items.value || []).filter(it => {
+    const t = it.title ?? ''
+    const c = it.category ?? ''
+    const p = it.price != null ? Number(it.price) : null
+    const r = avg(it)
+
+    if (q.global) {
+      const hit = contains(t, q.global) || contains(c, q.global) ||
+                  contains(formatPrice(p), q.global) || String(r).includes(q.global)
+      if (!hit) return false
     }
-  }
-  </script>
-  
-  <style scoped>
-  .card{background:var(--panel);border:1px solid #ddd;border-radius:12px;padding:16px;box-shadow:0 4px 10px rgba(0,0,0,.08)}
-  .grid{display:grid;gap:12px}
-  .input{width:100%;border:1px solid #ccc;background:#fff;color:var(--text);border-radius:8px;padding:10px 12px}
-  .btn{border:1px solid #ccc;background:#f0f0f0;color:var(--text);border-radius:8px;padding:10px 14px;cursor:pointer}
-  .btn.success{background:var(--accent);color:#fff;border:none}
-  .btn.danger{background:var(--danger);color:#fff;border:none}
-  .table{width:100%;border-collapse:collapse}
-  .table th,.table td{padding:8px;border-bottom:1px solid #ddd;text-align:left}
-  .error{color:var(--danger)}
-  </style>
-  
-  
+    if (q.title && !contains(t, q.title)) return false
+    if (q.category && !contains(c, q.category)) return false
+    if (q.priceMin != null && !(p != null && p >= q.priceMin)) return false
+    if (q.priceMax != null && !(p != null && p <= q.priceMax)) return false
+    if (q.ratingMin != null && !(r >= q.ratingMin)) return false
+    if (q.ratingMax != null && !(r <= q.ratingMax)) return false
+    return true
+  })
+})
+
+function onDelete(row){
+  if (!confirm(`Delete "${row.title}" ?`)) return
+  if (store.del) store.del(row.id)   // 按你的 store 实现对接
+}
+</script>
+
+<style scoped>
+.card{background:#fff;border:1px solid #ddd;border-radius:12px;padding:16px}
+.filters{display:grid;gap:10px;margin-bottom:10px}
+.row{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));align-items:end}
+.cell{display:flex;flex-direction:column;gap:6px}
+.mb-2{margin-bottom:12px}
+.btn{border:1px solid #ccc;background:#f0f0f0;color:#222;border-radius:8px;padding:6px 10px;cursor:pointer}
+.btn.danger{background:#ef4444;color:#fff;border:none}
+</style>

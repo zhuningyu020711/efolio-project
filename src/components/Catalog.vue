@@ -1,137 +1,158 @@
 <template>
-  <div class="card">
-    <div class="bar">
-      <h2>Catalog</h2>
-      <input class="input" placeholder="Search (≥3 chars)" v-model.trim="q" />
+  <section class="card">
+    <h3 class="mb-2">Catalog</h3>
+
+    <!-- 筛选区 -->
+    <div class="filters">
+      <div class="row">
+        <label class="cell">
+          <span>Global</span>
+          <InputText v-model="q.global" placeholder="Search all…" />
+        </label>
+
+        <label class="cell">
+          <span>Title</span>
+          <InputText v-model="q.title" placeholder="Title…" />
+        </label>
+
+        <label class="cell">
+          <span>Category</span>
+          <InputText v-model="q.category" placeholder="Category…" />
+        </label>
+      </div>
+
+      <div class="row">
+        <label class="cell">
+          <span>Price Min</span>
+          <InputText v-model.number="q.priceMin" type="number" placeholder="min" />
+        </label>
+        <label class="cell">
+          <span>Price Max</span>
+          <InputText v-model.number="q.priceMax" type="number" placeholder="max" />
+        </label>
+
+        <label class="cell">
+          <span>Rating Min</span>
+          <InputText v-model.number="q.ratingMin" type="number" placeholder="0–5" />
+        </label>
+        <label class="cell">
+          <span>Rating Max</span>
+          <InputText v-model.number="q.ratingMax" type="number" placeholder="0–5" />
+        </label>
+
+        <button class="btn" @click="resetFilters">Reset</button>
+      </div>
     </div>
 
-    <div v-if="safeItems.length === 0" class="muted">No items yet.</div>
-
-    <div class="grid" v-else>
-      <article v-for="it in filtered" :key="it.id" class="card item">
-        <header class="inline">
-          <h3>{{ safeText(it.title) }}</h3>
-          <span class="pill">{{ safeText(it.category) }}</span>
-        </header>
-        <p class="muted">{{ safeText(it.description) }}</p>
-
-        <div class="inline">
-          <div class="pill">
-            <span class="star">★</span>
-            <strong>{{ avg(it).toFixed(1) }}</strong> / 5
-            <span class="muted">({{ (it.reviews || []).length }})</span>
-          </div>
-        </div>
-
-        <details>
-          <summary>View reviews</summary>
-          <div v-if="(it.reviews || []).length === 0" class="muted">No reviews yet.</div>
-          <div v-else class="grid">
-            <div v-for="rv in it.reviews" :key="rv.id" class="card">
-              <div class="inline">
-                <span class="pill">{{ Number(rv.rating) || 0 }} ★</span>
-                <span class="muted">
-                  by {{ safeText(rv.byName) }} • {{ new Date(rv.createdAt || Date.now()).toLocaleString() }}
-                </span>
-              </div>
-              <p>{{ safeText(rv.comment) }}</p>
-            </div>
-          </div>
-        </details>
-
-        <!-- 登录后才显示表单；并且先确保 form[it.id] 已初始化 -->
-        <div v-if="store.state.session" class="card">
-          <template v-if="ensureForm(it.id)">
-            <form class="grid" @submit.prevent="submit(it.id)">
-              <label>Rating (1–5)
-                <input
-                  class="input" type="number" min="1" max="5" step="1"
-                  v-model.number="form[it.id].rating" required
-                />
-              </label>
-
-              <label>Comment (5–250)
-                <textarea
-                  class="input" rows="3"
-                  v-model.trim="form[it.id].comment"
-                  required minlength="5" maxlength="250"
-                ></textarea>
-              </label>
-
-              <button class="btn primary">Submit</button>
-            </form>
-          </template>
-        </div>
-        <div v-else class="muted">Login to leave a review.</div>
-      </article>
-    </div>
-  </div>
+    <!-- 表格 -->
+    <DataTable
+      :value="filteredItems"
+      dataKey="id"
+      paginator
+      :rows="10"
+      :rowsPerPageOptions="[10,20,50]"
+      removableSort
+      responsiveLayout="scroll"
+      :emptyMessage="'No items found'"
+    >
+      <Column field="title" header="Title" sortable />
+      <Column field="category" header="Category" sortable />
+      <Column header="Avg Rating" sortable :sortFunction="sortByAvg">
+        <template #body="slotProps">{{ avg(slotProps.data).toFixed(1) }}</template>
+      </Column>
+      <Column header="Reviews" :body="it => (it.reviews?.length || 0)" sortable />
+      <Column field="price" header="Price" sortable>
+        <template #body="slotProps">{{ formatPrice(slotProps.data.price) }}</template>
+      </Column>
+    </DataTable>
+  </section>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { computed, reactive } from 'vue'
 import { useStore } from '../utils/useStore'
+import DataTable from 'primevue/datatable'
+import Column from 'primevue/column'
+import InputText from 'primevue/inputtext'
 
 const store = useStore()
-const q = ref('')
-const form = reactive({})
+const items = computed(() => store.state.items || [])
 
-// 安全获取 items（始终是数组）
-const safeItems = computed(() => Array.isArray(store.state.items) ? store.state.items : [])
-
-// 组件挂载时可加载外部数据（失败不影响）
-onMounted(async () => {
-  try { await store.loadExternalData?.() } catch {}
+// 筛选条件
+const q = reactive({
+  global: '',
+  title: '',
+  category: '',
+  priceMin: null,
+  priceMax: null,
+  ratingMin: null,
+  ratingMax: null
 })
 
-// 任何文本都转成字符串，避免 toLowerCase 报错
-const safeText = (v) => (v == null ? '' : String(v))
+function resetFilters(){
+  q.global = q.title = q.category = ''
+  q.priceMin = q.priceMax = q.ratingMin = q.ratingMax = null
+}
 
-// 少于 3 个字符显示全部；否则模糊搜索
-const filtered = computed(() => {
-  const s = safeText(q.value).trim().toLowerCase()
-  const list = safeItems.value
-  if (s.length < 3) return list
-  return list.filter(it => {
-    const segs = [safeText(it.title), safeText(it.category), safeText(it.description)]
-    return segs.some(t => t.toLowerCase().includes(s))
+function avg(it){
+  const arr = it.reviews || []
+  if (!arr.length) return 0
+  return arr.reduce((s,r)=>s+(Number(r.rating)||0),0)/arr.length
+}
+
+function formatPrice(p){
+  if (p == null || p === '') return '-'
+  const n = Number(p)
+  return isNaN(n) ? '-' : `$${n.toFixed(2)}`
+}
+
+// 排序：按平均分
+function sortByAvg(ev){
+  const dir = ev.order // 1 asc, -1 desc
+  ev.data.sort((a,b) => (avg(a)-avg(b)) * dir)
+}
+
+// 文本包含判断（大小写不敏感）
+const contains = (source, needle) =>
+  String(source ?? '').toLowerCase().includes(String(needle ?? '').toLowerCase())
+
+// 组合筛选（全局 / 列 / 区间）
+const filteredItems = computed(() => {
+  return (items.value || []).filter(it => {
+    const t = it.title ?? ''
+    const c = it.category ?? ''
+    const p = it.price != null ? Number(it.price) : null
+    const r = avg(it)
+
+    // 全局（命中任一字段即可）
+    if (q.global) {
+      const hit = contains(t, q.global) || contains(c, q.global) ||
+                  contains(formatPrice(p), q.global) || String(r).includes(q.global)
+      if (!hit) return false
+    }
+
+    // 列筛选
+    if (q.title && !contains(t, q.title)) return false
+    if (q.category && !contains(c, q.category)) return false
+
+    // 价格区间
+    if (q.priceMin != null && !(p != null && p >= q.priceMin)) return false
+    if (q.priceMax != null && !(p != null && p <= q.priceMax)) return false
+
+    // 评分区间
+    if (q.ratingMin != null && !(r >= q.ratingMin)) return false
+    if (q.ratingMax != null && !(r <= q.ratingMax)) return false
+
+    return true
   })
 })
-
-// 平均分安全计算
-const avg = (it) => {
-  const arr = Array.isArray(it.reviews) ? it.reviews : []
-  if (arr.length === 0) return 0
-  const sum = arr.reduce((a, b) => a + (Number(b.rating) || 0), 0)
-  return sum / arr.length
-}
-
-// ⭐ 关键：先确保 form[id] 存在，再渲染 v-model
-function ensureForm(id){
-  if (!form[id]) form[id] = { rating: 5, comment: '' }
-  return true
-}
-
-function submit(id){
-  ensureForm(id)
-  const { rating, comment } = form[id]
-  try{
-    store.submitReview(id, { rating, comment })
-    form[id] = { rating: 5, comment: '' }
-  }catch(e){ alert(e.message) }
-}
 </script>
 
 <style scoped>
-.card{background:var(--panel);border:1px solid #ddd;border-radius:12px;padding:16px;box-shadow:0 4px 10px rgba(0,0,0,.08)}
-.grid{display:grid;gap:12px}
-.item{gap:10px}
-.inline{display:flex;gap:10px;align-items:center}
-.pill{display:inline-flex;gap:6px;align-items:center;padding:4px 8px;border-radius:999px;background:#f2f2f2;border:1px solid #ccc;font-size:12px;color:var(--text)}
-.star{font-size:18px;color:#ffbb33}
-.input{width:100%;border:1px solid #ccc;background:#fff;color:var(--text);border-radius:8px;padding:10px 12px}
-.bar{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:8px}
-.muted{color:var(--muted)}
-.btn{border:1px solid #ccc;background:#f0f0f0;color:var(--text);border-radius:8px;padding:10px 14px;cursor:pointer}
-.btn.primary{background:var(--brand);color:#fff;border:none}
+.card{background:#fff;border:1px solid #ddd;border-radius:12px;padding:16px}
+.filters{display:grid;gap:10px;margin-bottom:10px}
+.row{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));align-items:end}
+.cell{display:flex;flex-direction:column;gap:6px}
+.mb-2{margin-bottom:12px}
+.btn{border:1px solid #ccc;background:#f0f0f0;color:#222;border-radius:8px;padding:8px 12px;cursor:pointer}
 </style>

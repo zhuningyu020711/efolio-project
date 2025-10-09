@@ -1,17 +1,22 @@
+
 // src/firebase.js
-import { initializeApp } from 'firebase/app'
-import { getAuth } from 'firebase/auth'
+import { initializeApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+import { getFunctions } from "firebase/functions";
 
 
 const firebaseConfig = {
-    apiKey: "AIzaSyAcR8eRn__ruZ8_kEr10TuPCLrqEgmQDfQ",
-    authDomain: "efolio-project.firebaseapp.com",
-    projectId: "efolio-project",
-    storageBucket: "efolio-project.firebasestorage.app",
-    messagingSenderId: "298508974584",
-    appId: "1:298508974584:web:c9eed82da549c867e7fe0d",
-    measurementId: "G-7SP85RRG5G"
-}
+    apiKey: "AIzaSyAhNy0UGKNbDs1lYx7oXXfqIsqtgn_ETuI",
+    authDomain: "ass1-e2105.firebaseapp.com",
+    projectId: "ass1-e2105",
+    storageBucket: "ass1-e2105.firebasestorage.app",
+    messagingSenderId: "1093944935195",
+    appId: "1:1093944935195:web:9bd29bcc262852cebf49be",
+    measurementId: "G-5B2YWDD3H7"
+  };
 
-export const firebaseApp = initializeApp(firebaseConfig)
-export const auth = getAuth(firebaseApp)
+  export const app = initializeApp(firebaseConfig);
+  export const auth = getAuth(app);
+  export const db = getFirestore(app);
+  export const functions = getFunctions(app, "australia-southeast1");

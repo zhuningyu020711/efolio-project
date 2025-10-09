@@ -1,22 +1,19 @@
 // src/main.js
 import { createApp } from 'vue'
 import App from './App.vue'
-import 'bootstrap/dist/css/bootstrap.min.css'
 
+// ✅ PrimeVue 主题与核心
 import PrimeVue from 'primevue/config'
-import Aura from '@primevue/themes/aura'
-import 'primeicons/primeicons.css'
-
-import './style.css'
-
-// 👉 关键：引入 Firebase 初始化 & bridge
-import './firebase'
-import { initAuthBridge } from './services/fbauth'
+import Aura from '@primevue/themes/aura'   // 官方主题预设
+import 'primeicons/primeicons.css'         // 图标
 
 const app = createApp(App)
-app.use(PrimeVue, { theme: { preset: Aura } })
+
+app.use(PrimeVue, {
+  theme: {
+    preset: Aura,       // 你也可以换成其它主题
+    options: { darkModeSelector: '.dark' }
+  }
+})
 
 app.mount('#app')
-
-// 初始化与 store 的联动
-initAuthBridge()
