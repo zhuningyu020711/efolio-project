@@ -1,15 +1,23 @@
 <template>
   <section>
-    <h2 class="sr-only" id="admin-table">Admin Items</h2>
+    <div class="toolbar">
+      <div class="inline">
+        <label for="minPrice">Min price</label>
+        <input id="minPrice" type="number" min="0" v-model.number="minPrice" @input="pageIndex=0" />
+        <label for="minRating">Min rating</label>
+        <input id="minRating" type="number" min="0" max="5" step="0.5" v-model.number="minRating" @input="pageIndex=0" />
+      </div>
 
-    <div class="inline">
-      <label for="minPrice">Min price</label>
-      <input id="minPrice" type="number" min="0" v-model.number="minPrice" @input="pageIndex=0" />
-      <label for="minRating">Min rating</label>
-      <input id="minRating" type="number" min="0" max="5" step="0.5" v-model.number="minRating" @input="pageIndex=0" />
+      <div class="inline" role="group" aria-label="Export">
+        <button type="button" class="btn" @click="exportCSV(false)">CSV (page)</button>
+        <button type="button" class="btn" @click="exportCSV(true)">CSV (all)</button>
+        <button type="button" class="btn" @click="exportPDF(false)">PDF (page)</button>
+        <button type="button" class="btn" @click="exportPDF(true)">PDF (all)</button>
+      </div>
     </div>
 
     <table class="table" aria-labelledby="admin-table">
+      <caption id="admin-table" class="sr-only">Admin items with filters, pagination and export</caption>
       <thead>
         <tr>
           <th scope="col">ID</th>
@@ -50,6 +58,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useStore } from '../utils/useStore'
+import { exportToCSV, exportToPDF } from '../utils/export'
 const store = useStore()
 
 const minPrice = ref(0)
@@ -58,6 +67,13 @@ const sort = ref({ key: 'price', order: 'asc' })
 const pageIndex = ref(0)
 const pageSize = 10
 
+const columns = [
+  { key: 'id', label: 'ID' },
+  { key: 'price', label: 'Price' },
+  { key: 'rating', label: 'Rating' },
+  { key: 'title', label: 'Title' }
+]
+
 const items = computed(() => (store.state.items || []).map(it => ({
   id: it.id, title: it.title || it.name || 'Untitled',
   price: Number(it.price ?? 0),
@@ -65,7 +81,10 @@ const items = computed(() => (store.state.items || []).map(it => ({
 })))
 
 const filtered = computed(() => {
-  const arr = items.value.filter(i => i.price >= (minPrice.value||0) && (isNaN(i.rating) ? true : i.rating >= (minRating.value||0)))
+  const arr = items.value.filter(i =>
+    i.price >= (minPrice.value||0) &&
+    (isNaN(i.rating) ? true : i.rating >= (minRating.value||0))
+  )
   const { key, order } = sort.value
   arr.sort((a,b) => (a[key] ?? 0) - (b[key] ?? 0))
   if (order==='desc') arr.reverse()
@@ -83,6 +102,13 @@ function ariaSort(key){
   if (sort.value.key !== key) return 'none'
   return sort.value.order === 'asc' ? 'ascending' : 'descending'
 }
+
+function rows(all){
+  const rows = all ? filtered.value : pageItems.value
+  return rows.map(r => ({ ...r, price: r.price.toFixed(2) }))
+}
+function exportCSV(all){ exportToCSV('Admin', columns, rows(all)) }
+function exportPDF(all){ exportToPDF('Admin', columns, rows(all), 'Admin') }
 </script>
 
 <style scoped>
@@ -90,5 +116,6 @@ function ariaSort(key){
 .table th,.table td{ border:1px solid #e5e7eb; padding:8px; text-align:left; }
 .linklike{ background:none; border:none; color:#1d4ed8; cursor:pointer; text-decoration:underline; }
 .pagination{ display:flex; gap:6px; align-items:center; margin-top:10px; flex-wrap:wrap; }
-.inline{ display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+.inline{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.toolbar{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; flex-wrap:wrap; }
 </style>
