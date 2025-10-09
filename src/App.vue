@@ -9,6 +9,7 @@
       <button class="btn" v-if="!store.state.session" @click="page='auth'">Login / Register</button>
       <button class="btn" v-if="store.state.session" @click="page='dashboard'">Dashboard</button>
       <button class="btn" v-if="isAdmin" @click="page='admin'">Admin</button>
+      <button class="btn" @click="page='map'">Map</button>
       <button class="btn" @click="resetData">Reset Data</button>
       <button class="btn danger" v-if="store.state.session" @click="onLogout">Logout</button>
     </nav>
@@ -19,13 +20,15 @@
     <section v-if="page==='home'" class="card">
       <h2>Welcome</h2>
       <p class="muted">
-        Use the navigation to open <strong>Catalog</strong>, <strong>Email</strong>, <strong>Serverless</strong>, <strong>Admin</strong>, and <strong>Dashboard</strong>.
+        Use the navigation to open <strong>Catalog</strong>, <strong>Email</strong>,
+        <strong>Serverless</strong>, <strong>Map</strong>, <strong>Admin</strong>, and <strong>Dashboard</strong>.
       </p>
       <ul>
         <li>✅ Firebase Auth</li>
         <li>✅ Email via EmailJS (no backend keys in frontend)</li>
         <li>✅ Interactive Tables (Admin / Catalog) with filters & pagination</li>
         <li>✅ Serverless aggregation with Cloudflare Workers</li>
+        <li>✅ Mapbox: route planning + nearby POI</li>
         <li>☁️ Deployed on Cloudflare Pages</li>
       </ul>
     </section>
@@ -46,6 +49,11 @@
     <section v-else-if="page==='serverless'" class="card">
       <h2>Serverless</h2>
       <ServerlessDemo />
+    </section>
+
+    <!-- Map -->
+    <section v-else-if="page==='map'" class="card" style="padding:0">
+      <MapView />
     </section>
 
     <!-- Auth -->
@@ -104,7 +112,7 @@ import Auth from './components/Auth.vue'
 import Admin from './components/Admin.vue'
 import Catalog from './components/Catalog.vue'
 import Email from './components/Email.vue'
-
+import MapView from './components/Map.vue'
 // 新增的 Serverless 演示页
 import ServerlessDemo from './components/ServerlessDemo.vue'
 
