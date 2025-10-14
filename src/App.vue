@@ -7,16 +7,26 @@
       <button type="button" class="btn" :aria-current="page==='catalog' ? 'page' : null" @click="page='catalog'">Catalog</button>
       <button type="button" class="btn" :aria-current="page==='email' ? 'page' : null" @click="page='email'">Email</button>
       <button type="button" class="btn" :aria-current="page==='serverless' ? 'page' : null" @click="page='serverless'">Serverless</button>
-      <button type="button" class="btn" v-if="!store.state.session" :aria-current="page==='auth' ? 'page' : null" @click="page='auth'">Login / Register</button>
       <button type="button" class="btn" v-if="store.state.session" :aria-current="page==='dashboard' ? 'page' : null" @click="page='dashboard'">Dashboard</button>
       <button type="button" class="btn" v-if="isAdmin" :aria-current="page==='admin' ? 'page' : null" @click="page='admin'">Admin</button>
       <button type="button" class="btn" :aria-current="page==='map' ? 'page' : null" @click="page='map'">Map</button>
       <button type="button" class="btn" @click="resetData">Reset Data</button>
-      <button type="button" class="btn danger" v-if="store.state.session" aria-label="Log out" @click="onLogout">Logout</button>
+
+      <!-- 登录 / 登出（只这一块是新增/修改） -->
+      <template v-if="!store.state.session">
+        <button type="button" class="btn"
+                :aria-current="page==='auth' ? 'page' : null"
+                @click="page='auth'">
+          Login / Register
+        </button>
+      </template>
+      <template v-else>
+        <span class="pill" style="margin-left:4px">{{ store.state.session.email || 'user' }}</span>
+        <button type="button" class="btn danger" aria-label="Log out" @click="onLogout">Logout</button>
+      </template>
     </nav>
   </header>
 
-  <!-- 主区域可聚焦，供 Skip link 定位 -->
   <main id="main" class="wrap" role="main" tabindex="-1">
     <!-- Home -->
     <section v-if="page==='home'" class="card" aria-labelledby="home-h1">
@@ -133,7 +143,11 @@ function resetData(){
   if (store.loadExternalData) store.loadExternalData()
 }
 function onLogout(){
-  if (store.logout) store.logout()
+  try {
+    if (store.logout) store.logout()
+    else if (store.clearSession) store.clearSession()
+  } catch {}
+  page.value = 'home'
 }
 </script>
 
@@ -154,13 +168,13 @@ function onLogout(){
 .hstack{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .card{background:var(--panel);border:1px solid #ddd;border-radius:12px;padding:16px;
   box-shadow:0 4px 10px rgba(0,0,0,0.08)}
-.muted{color:var(--muted)}
+.muted{color:#6b7280}
 .inline{display:flex;gap:10px;align-items:center}
 .grid{display:grid;gap:12px}
 .btn{border:1px solid #ccc;background:#f0f0f0;color:var(--text);border-radius:8px;padding:8px 14px;cursor:pointer}
 .btn.primary{background:#1d4ed8;color:#fff;border:none}
 .btn.success{background:var(--accent);color:#fff;border:none}
-.btn.danger{background:var(--danger);color:#fff;border:none}
+.btn.danger{background:#b91c1c;color:#fff;border:none}
 .pill{display:inline-flex;gap:6px;align-items:center;padding:4px 8px;border-radius:999px;
   background:#f2f2f2;border:1px solid #ccc;font-size:12px}
 </style>

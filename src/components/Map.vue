@@ -4,13 +4,13 @@
       <h2>Map & Geo Features</h2>
 
       <div v-if="picking" class="pick-banner">
-        Picking: <strong>{{ picking }}</strong> — click the map to set {{ picking }}
+        Selecting: <strong>{{ picking }}</strong> — click on the map to set {{ picking }}
         <button type="button" class="btn" @click.stop.prevent="picking=null">Cancel</button>
       </div>
 
-      <!-- 路线规划 -->
+      <!-- Route Planning -->
       <div class="block">
-        <h3>Route Planner</h3>
+        <h3>Route to Event</h3>
 
         <div class="row">
           <div class="cell">
@@ -49,7 +49,7 @@
             <span class="lbl">&nbsp;</span>
             <div class="mini">
               <button type="button" class="btn" :disabled="!from || !to" @click.stop.prevent="swap">Swap</button>
-              <button type="button" class="btn primary" :disabled="!from || !to" @click.stop.prevent="buildRoute">Build Route</button>
+              <button type="button" class="btn primary" :disabled="!from || !to" @click.stop.prevent="buildRoute">Build Route to Event</button>
             </div>
           </div>
         </div>
@@ -64,12 +64,12 @@
         </details>
       </div>
 
-      <!-- 附近 POI -->
+      <!-- Nearby Facilities -->
       <div class="block">
-        <h3>Nearby Places</h3>
+        <h3>Nearby Facilities</h3>
         <div class="row">
           <div class="cell">
-            <span class="lbl">Category</span>
+            <span class="lbl">Facility Type</span>
             <select v-model="poiCategory" class="input">
               <option v-for="c in categories" :key="c.q" :value="c.q">{{ c.label }}</option>
             </select>
@@ -77,7 +77,7 @@
           <div class="cell">
             <span class="lbl">Center</span>
             <select v-model="poiCenter" class="input">
-              <option value="map">Map center</option>
+              <option value="map">Map Center</option>
               <option value="from" :disabled="!from">From</option>
               <option value="to" :disabled="!to">To</option>
             </select>
@@ -88,14 +88,14 @@
           </div>
           <div class="cell">
             <span class="lbl">&nbsp;</span>
-            <button type="button" class="btn" @click.stop.prevent="searchPOI">Search POI</button>
+            <button type="button" class="btn" @click.stop.prevent="searchPOI">Search Facilities</button>
           </div>
         </div>
-        <div v-if="pois.length" class="mini muted">{{ pois.length }} place(s) found</div>
+        <div v-if="pois.length" class="mini muted">{{ pois.length }} facility found</div>
       </div>
     </div>
 
-    <div ref="mapEl" class="map" role="region" aria-label="Interactive map showing route and nearby places"></div>
+    <div ref="mapEl" class="map" role="region" aria-label="Interactive map showing route and nearby facilities"></div>
   </section>
 </template>
 
@@ -104,7 +104,6 @@ import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import mapboxgl from 'mapbox-gl'
 import MapboxGeocoder from '@mapbox/mapbox-gl-geocoder'
 
-/* ---------------- ENV / ENDPOINT ---------------- */
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
 mapboxgl.accessToken = MAPBOX_TOKEN
 
@@ -112,7 +111,6 @@ const REGION  = import.meta.env.VITE_FUNCTIONS_REGION || 'us-central1'
 const PROJECT = import.meta.env.VITE_FIREBASE_PROJECT_ID
 const BASE    = `https://${REGION}-${PROJECT}.cloudfunctions.net`  // /mapDirections /mapPOI
 
-/* ---------------- Refs / State ---------------- */
 const mapEl = ref(null)
 const fromBox = ref(null)
 const toBox = ref(null)
@@ -129,22 +127,20 @@ const steps = ref([])
 const routeInfo = ref(null)
 const picking = ref(null)
 
+/* English facility categories */
 const categories = [
-  { q: 'cafe', label: 'Cafe' },
-  { q: 'restaurant', label: 'Restaurant' },
-  { q: 'supermarket', label: 'Supermarket' },
-  { q: 'hospital', label: 'Hospital' },
-  { q: 'school', label: 'School' },
-  { q: 'park', label: 'Park' },
+  { q: 'restaurant,cafe,food', label: 'Food & Drink' },
+  { q: 'parking,parking lot', label: 'Parking' },
+  { q: 'bus station,subway station,train station,tram stop,transit station', label: 'Public Transport' },
+  { q: 'stadium,arena,conference center,exhibition hall,concert hall,venue', label: 'Venues' },
 ]
 const poiCategory = ref(categories[0].q)
 const poiCenter = ref('map')
 const radiusKm = ref(1.0)
 const pois = ref([])
 const poiMarkers = ref([])
-let poiAborter = null  // 并发防抖
+let poiAborter = null
 
-/* ---------------- Utilities ---------------- */
 function makeMarker(lngLat, color='#2563eb'){ return new mapboxgl.Marker({ color }).setLngLat(lngLat).addTo(map.value) }
 function clearRoute(){
   steps.value = []; routeInfo.value = null
@@ -156,7 +152,7 @@ function swap(){ const tmp = from.value; from.value = to.value; to.value = tmp; 
 function fitBoundsToPoints(points){ const b = new mapboxgl.LngLatBounds(); points.forEach(p => b.extend([p.lng, p.lat])); map.value.fitBounds(b, { padding: 60, duration: 600 }) }
 function togglePick(which){ picking.value = picking.value === which ? null : which }
 
-/* ---------------- Cloud Functions: Directions ---------------- */
+/* --- Directions --- */
 async function buildRoute(){
   if (!from.value || !to.value) return
   clearRoute()
@@ -187,76 +183,57 @@ async function buildRoute(){
   }
 }
 
-/* ---------------- Cloud Functions: POI（仅此函数做了增强） ---------------- */
+/* --- POI Search --- */
 async function searchPOI(){
-  // 取消上一次请求，避免并发竞态导致“时好时坏”
   if (poiAborter) poiAborter.abort()
   poiAborter = new AbortController()
 
   clearPoi()
-
-  // 计算中心：优先 from/to，没有就取地图中心
   let center
-  try{
-    if (poiCenter.value === 'from' && from.value) center = [from.value.lng, from.value.lat]
-    else if (poiCenter.value === 'to' && to.value) center = [to.value.lng, to.value.lat]
-    else center = map.value.getCenter().toArray()
-  }catch{
-    center = [144.9631, -37.8136] // fallback: Melbourne CBD
-  }
+  if (poiCenter.value === 'from' && from.value) center = [from.value.lng, from.value.lat]
+  else if (poiCenter.value === 'to' && to.value) center = [to.value.lng, to.value.lat]
+  else center = map.value.getCenter().toArray()
 
   try{
     const q = new URLSearchParams({
-      q: poiCategory.value || 'poi',
+      q: poiCategory.value,
       center: `${center[0]},${center[1]}`,
       limit: '15',
-      // 半径做下限保护，提升命中率
-      radiusKm: String(Math.max(radiusKm.value || 1.5, 1.5))
+      radiusKm: String(Math.max(radiusKm.value || 1, 0.2))
     })
-    const url = `${BASE}/mapPOI?${q.toString()}`
-    console.log('[POI] request:', url)
-
-    const res = await fetch(url, { signal: poiAborter.signal })
+    const res = await fetch(`${BASE}/mapPOI?${q.toString()}`, { signal: poiAborter.signal })
     const data = await res.json()
-    console.log('[POI] response:', data)
-
     if (!data.ok) {
       alert(data.error || 'POI failed')
       return
     }
 
-    const list = Array.isArray(data.features) ? data.features : []
+    const list = data.features || []
     if (!list.length){
-      alert('No places found in the given radius. Try 3–5 km.')
+      alert('No facilities found within the given radius.')
       return
     }
 
-    // 渲染 POI 标记（不影响路线）
     list.forEach(f => {
       const [lng, lat] = f.coordinates
-      const m = new mapboxgl.Marker({ color: '#22c55e' })
+      const m = new mapboxgl.Marker({ color: '#f59e0b' })
         .setLngLat([lng, lat])
-        .setPopup(new mapboxgl.Popup({ offset: 10 }).setHTML(
-          `<strong>${f.text || 'Unnamed'}</strong><br>${f.place_name || ''}`
-        ))
+        .setPopup(new mapboxgl.Popup({ offset: 8 }).setHTML(`<strong>${f.text || 'Unnamed'}</strong>`))
         .addTo(map.value)
       poiMarkers.value.push(m)
     })
     pois.value = list
 
-    // 自动视野（包含中心点）
     const b = new mapboxgl.LngLatBounds()
-    list.forEach(f => b.extend(f.coordinates))
-    b.extend(center)
-    map.value.fitBounds(b, { padding: 60, duration: 700 })
+    list.forEach(f => b.extend(f.coordinates)); b.extend(center)
+    map.value.fitBounds(b, { padding: 60, duration: 600 })
   }catch(err){
     if (err.name === 'AbortError') return
-    console.error(err)
     alert(`POI failed: ${err.message}`)
   }
 }
 
-/* ---------------- Pick & Geolocate ---------------- */
+/* --- Pick & Geolocation --- */
 function useMyLocation(which){
   if (!navigator.geolocation) return alert('Geolocation not available')
   navigator.geolocation.getCurrentPosition(pos => {
@@ -273,7 +250,7 @@ watch(picking, (val) => {
   canvas.style.cursor = val ? 'crosshair' : ''
 })
 
-/* ---------------- Map Init ---------------- */
+/* --- Map Initialization --- */
 onMounted(() => {
   const m = new mapboxgl.Map({
     container: mapEl.value,
@@ -321,7 +298,7 @@ onBeforeUnmount(() => { clearPoi(); if (map.value) map.value.remove() })
 
 <style scoped>
 .wrap{display:grid;grid-template-columns:380px 1fr;gap:12px}
-.panel{position:relative; z-index:1000; background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px; pointer-events:auto}
+.panel{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px}
 .block{border-top:1px dashed #e5e7eb;padding-top:12px;margin-top:10px}
 .row{display:grid;gap:10px;grid-template-columns:1fr 1fr}
 .cell{display:flex;flex-direction:column;gap:6px}
@@ -331,12 +308,12 @@ onBeforeUnmount(() => { clearPoi(); if (map.value) map.value.remove() })
 .btn.primary{background:#2563eb;color:#fff;border-color:#2563eb}
 .pill{display:inline-flex;gap:6px;align-items:center;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:999px;padding:2px 8px}
 .stats{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
-.mini{position:relative; z-index:1002; display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px}
+.mini{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px}
 .muted{color:#6b7280}
-.map{position:relative; z-index:1; height:72vh;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden}
+.map{height:72vh;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden}
 .pick-banner{margin:8px 0; padding:8px; border-radius:8px; background:#f1f5ff; border:1px solid #c7d2fe; display:flex; gap:8px; align-items:center; flex-wrap:wrap}
 .geocoder{position:relative; z-index:1001}
-.geocoder :deep(.mapboxgl-ctrl-geocoder){display:block; position:relative; z-index:1001; min-width:100%; max-width:100%}
+.geocoder :deep(.mapboxgl-ctrl-geocoder){display:block; position:relative; min-width:100%}
 @media (max-width: 920px){ .wrap{grid-template-columns:1fr} .map{height:60vh} }
 </style>
 
