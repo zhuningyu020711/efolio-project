@@ -1,90 +1,123 @@
 <template>
-    <section class="card">
-      <h2>Serverless Demo (Cloudflare Workers)</h2>
-      <p class="muted">Send all ratings to a serverless function for aggregation.</p>
-  
+  <section class="card" aria-labelledby="srv-h1">
+    <h2 id="srv-h1">Serverless (Firebase Functions)</h2>
+
+    <!-- 计算示例 /add -->
+    <fieldset class="block">
+      <legend>Adder API</legend>
+      <div class="grid2">
+        <div class="field">
+          <label for="a">A</label>
+          <input id="a" type="number" v-model.number="a" />
+        </div>
+        <div class="field">
+          <label for="b">B</label>
+          <input id="b" type="number" v-model.number="b" />
+        </div>
+      </div>
       <div class="inline">
-        <button class="btn primary" :disabled="loading" @click="run">
-          Compute Summary (Server)
-        </button>
-        <span v-if="loading" class="muted">Working…</span>
-        <span v-if="status" :class="ok ? 'ok' : 'err'">{{ status }}</span>
+        <button type="button" class="btn primary" @click="runAdd">Calculate</button>
+        <span aria-live="polite" class="muted">{{ addStatus }}</span>
       </div>
-  
-      <div v-if="result" class="grid mt">
-        <div class="stat"><span>Count</span><strong>{{ result.count }}</strong></div>
-        <div class="stat"><span>Average</span><strong>{{ result.avg.toFixed(2) }}</strong></div>
-        <div class="stat"><span>Min</span><strong>{{ result.min ?? '-' }}</strong></div>
-        <div class="stat"><span>Max</span><strong>{{ result.max ?? '-' }}</strong></div>
+      <p v-if="addError" class="err" role="alert" aria-live="assertive">{{ addError }}</p>
+      <p v-if="sum!==null" class="pill">Result: <strong>{{ sum }}</strong></p>
+    </fieldset>
+
+    <!-- 发信示例 /sendMail -->
+    <fieldset class="block">
+      <legend>Send email (via Firebase)</legend>
+
+      <div class="field">
+        <label for="to">To</label>
+        <input id="to" type="email" v-model.trim="to" required inputmode="email" />
       </div>
-  
-      <div v-if="result" class="card mt">
-        <h3>Distribution (nearest star)</h3>
-        <table class="dist">
-          <thead><tr><th>Stars</th><th>Count</th></tr></thead>
-          <tbody>
-            <tr v-for="k in [0,1,2,3,4,5]" :key="k">
-              <td>{{ k }}</td>
-              <td>{{ result.buckets[k] }}</td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="field">
+        <label for="subject">Subject</label>
+        <input id="subject" v-model.trim="subject" required />
       </div>
-    </section>
-  </template>
-  
-  <script setup>
-  import { ref, computed } from 'vue'
-  import { useStore } from '../utils/useStore'
-  import { summarizeRatings } from '../services/serverless'
-  
-  const store = useStore()
-  const items = computed(() => store.state.items || [])
-  
-  const loading = ref(false)
-  const status  = ref('')
-  const ok      = ref(false)
-  const result  = ref(null)
-  
-  function collectRatings(){
-    const ratings = []
-    for (const it of items.value) {
-      for (const r of (it.reviews || [])) {
-        const n = Number(r?.rating)
-        if (Number.isFinite(n)) ratings.push(n)
-      }
-    }
-    return ratings
+      <div class="field">
+        <label for="msg">Message</label>
+        <textarea id="msg" rows="5" v-model="text" required></textarea>
+      </div>
+
+      <div class="inline">
+        <button type="button" class="btn primary" @click="sendMail">Send</button>
+        <span class="muted" aria-live="polite">{{ mailStatus }}</span>
+      </div>
+      <p v-if="mailError" class="err" role="alert" aria-live="assertive">{{ mailError }}</p>
+    </fieldset>
+
+    <!-- 基础信息 -->
+    <details class="block">
+      <summary>Function base URL</summary>
+      <code>{{ BASE }}</code>
+    </details>
+  </section>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+
+/** 拼接 Firebase Functions 基础 URL */
+const REGION  = import.meta.env.VITE_FUNCTIONS_REGION || 'us-central1'
+const PROJECT = import.meta.env.VITE_FIREBASE_PROJECT_ID
+const BASE    = `https://${REGION}-${PROJECT}.cloudfunctions.net`
+
+// /add
+const a = ref(2)
+const b = ref(5)
+const sum = ref(null)
+const addStatus = ref('')
+const addError = ref('')
+
+async function runAdd(){
+  addStatus.value = 'Calling…'
+  addError.value = ''
+  sum.value = null
+  try{
+    const url = `${BASE}/add?a=${encodeURIComponent(a.value)}&b=${encodeURIComponent(b.value)}`
+    const r = await fetch(url)
+    const data = await r.json()
+    if (!data.ok) throw new Error(data.error || 'Failed')
+    sum.value = data.sum
+    addStatus.value = 'Done ✅'
+  }catch(e){
+    addError.value = e.message || String(e)
+    addStatus.value = ''
   }
-  
-  async function run(){
-    loading.value = true; status.value=''; ok.value=false; result.value=null
-    try{
-      const ratings = collectRatings()
-      const data = await summarizeRatings(ratings)
-      result.value = data
-      ok.value = true
-      status.value = 'Done ✅'
-    }catch(e){
-      ok.value = false
-      status.value = 'Failed ❌ ' + (e?.message || e)
-    }finally{
-      loading.value = false
-    }
+}
+
+// /sendMail
+const to = ref('')
+const subject = ref('Hello from Firebase Functions')
+const text = ref('It works!')
+const mailStatus = ref('')
+const mailError = ref('')
+
+async function sendMail(){
+  mailStatus.value = 'Sending…'
+  mailError.value = ''
+  try{
+    const r = await fetch(`${BASE}/sendMail`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ to: to.value, subject: subject.value, text: text.value })
+    })
+    const data = await r.json()
+    if (!data.ok) throw new Error(data.error || 'Failed')
+    mailStatus.value = 'Sent ✅'
+  }catch(e){
+    mailError.value = e.message || String(e)
+    mailStatus.value = ''
   }
-  </script>
-  
-  <style scoped>
-  .card{background:#fff;border:1px solid #ddd;border-radius:12px;padding:16px}
-  .inline{display:flex;gap:10px;align-items:center}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
-  .stat{border:1px solid #eee;border-radius:10px;padding:10px}
-  .muted{color:#6b7280}
-  .ok{color:#16a34a}.err{color:#ef4444}
-  .btn{border:1px solid #ccc;background:#f0f0f0;color:#222;border-radius:8px;padding:8px 12px;cursor:pointer}
-  .btn.primary{background:#3b82f6;color:#fff;border:none}
-  table.dist{width:100%;border-collapse:collapse}
-  table.dist th,table.dist td{border:1px solid #eee;padding:6px 8px;text-align:left}
-  .mt{margin-top:12px}
-  </style>
-  
+}
+</script>
+
+<style scoped>
+.block{border-top:1px dashed #e5e7eb; padding-top:12px; margin-top:12px}
+.field{display:flex; flex-direction:column; gap:6px; margin-bottom:10px}
+.inline{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+.pill{display:inline-flex; gap:6px; align-items:center; background:#f1f5f9; border:1px solid #e2e8f0; border-radius:999px; padding:4px 8px}
+.err{color:#b91c1c}
+</style>

@@ -61,6 +61,11 @@ import { useStore } from '../utils/useStore'
 import { exportToCSV, exportToPDF } from '../utils/export'
 const store = useStore()
 
+// Firebase Functions base
+const REGION  = import.meta.env.VITE_FUNCTIONS_REGION || 'us-central1'
+const PROJECT = import.meta.env.VITE_FIREBASE_PROJECT_ID
+const BASE    = `https://${REGION}-${PROJECT}.cloudfunctions.net`
+
 const minPrice = ref(0)
 const minRating = ref(0)
 const sort = ref({ key: 'price', order: 'asc' })
@@ -103,12 +108,45 @@ function ariaSort(key){
   return sort.value.order === 'asc' ? 'ascending' : 'descending'
 }
 
+async function auditExport(payload){
+  try{
+    await fetch(`${BASE}/auditExport`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    })
+  }catch(e){ /* ignore */ }
+}
+
 function rows(all){
   const rows = all ? filtered.value : pageItems.value
   return rows.map(r => ({ ...r, price: r.price.toFixed(2) }))
 }
-function exportCSV(all){ exportToCSV('Admin', columns, rows(all)) }
-function exportPDF(all){ exportToPDF('Admin', columns, rows(all), 'Admin') }
+function exportCSV(all){
+  const data = rows(all)
+  exportToCSV('Admin', columns, data)
+  auditExport({
+    table: 'Admin',
+    format: 'csv',
+    scope: all ? 'all' : 'page',
+    count: data.length,
+    filters: { minPrice: minPrice.value, minRating: minRating.value },
+    sort: sort.value,
+    user: store?.state?.session?.email || null
+  })
+}
+function exportPDF(all){
+  const data = rows(all)
+  exportToPDF('Admin', columns, data, 'Admin')
+  auditExport({
+    table: 'Admin',
+    format: 'pdf',
+    scope: all ? 'all' : 'page',
+    count: data.length,
+    filters: { minPrice: minPrice.value, minRating: minRating.value },
+    sort: sort.value,
+    user: store?.state?.session?.email || null
+  })
+}
 </script>
 
 <style scoped>
@@ -118,4 +156,5 @@ function exportPDF(all){ exportToPDF('Admin', columns, rows(all), 'Admin') }
 .pagination{ display:flex; gap:6px; align-items:center; margin-top:10px; flex-wrap:wrap; }
 .inline{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .toolbar{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; flex-wrap:wrap; }
+.sr-only{ position:absolute!important; width:1px; height:1px; overflow:hidden; clip:rect(1px,1px,1px,1px); white-space:nowrap; border:0; padding:0; margin:-1px; }
 </style>
