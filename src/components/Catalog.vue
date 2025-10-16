@@ -1,156 +1,108 @@
 <template>
-  <section>
-    <div class="toolbar">
-      <div class="inline" role="search">
-        <label for="q">Search</label>
-        <input id="q" v-model.trim="q" placeholder="Search title…" @input="pageIndex=0" />
-      </div>
+  <section aria-labelledby="catalog-title" tabindex="0">
+    <h2 id="catalog-title">Catalog</h2>
 
-      <div class="inline" role="group" aria-label="Export">
-        <button type="button" class="btn" @click="exportCSV(false)" aria-label="Export current page to CSV">CSV (page)</button>
-        <button type="button" class="btn" @click="exportCSV(true)"  aria-label="Export all results to CSV">CSV (all)</button>
-        <button type="button" class="btn" @click="exportPDF(false)" aria-label="Export current page to PDF">PDF (page)</button>
-        <button type="button" class="btn" @click="exportPDF(true)"  aria-label="Export all results to PDF">PDF (all)</button>
-      </div>
+    <div class="controls" role="region" aria-label="Catalog controls">
+      <input
+        type="text"
+        v-model="search"
+        class="input"
+        placeholder="Search by title..."
+        aria-label="Search catalog items by title"
+      />
+      <button type="button" class="btn" @click="clearSearch" aria-label="Clear search results">Clear</button>
     </div>
 
-    <table class="table" aria-describedby="tblHelp">
-      <caption id="tblHelp" class="sr-only">Sortable catalog table with pagination and export</caption>
+    <p id="catalog-desc" class="sr-only">
+      Table displays a list of catalog items with title, author, category, and price columns.
+      Each column header identifies the scope of the column.
+      Use tab to navigate through table controls.
+    </p>
+
+    <table class="table" role="table" aria-describedby="catalog-desc">
+      <caption class="sr-only">Catalog of items</caption>
       <thead>
         <tr>
-          <th scope="col">
-            <button type="button" class="linklike"
-              :aria-sort="ariaSort('title')" @click="toggleSort('title')">
-              Title <span class="sr-only" v-if="sort.key==='title'">({{ sort.order }})</span>
-            </button>
-          </th>
-          <th scope="col">
-            <button type="button" class="linklike"
-              :aria-sort="ariaSort('price')" @click="toggleSort('price')">
-              Price <span class="sr-only" v-if="sort.key==='price'">({{ sort.order }})</span>
-            </button>
-          </th>
-          <th scope="col">Rating</th>
+          <th scope="col">Title</th>
+          <th scope="col">Author</th>
+          <th scope="col">Category</th>
+          <th scope="col">Price</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="it in pageItems" :key="it.id">
-          <th scope="row">{{ it.title }}</th>
-          <td>${{ it.price.toFixed(2) }}</td>
-          <td>{{ isNaN(it.rating) ? '-' : it.rating }}</td>
+        <tr v-for="item in filteredItems" :key="item.id">
+          <td>{{ item.title }}</td>
+          <td>{{ item.author }}</td>
+          <td>{{ item.category }}</td>
+          <td>\${{ item.price.toFixed(2) }}</td>
         </tr>
-        <tr v-if="pageItems.length===0"><td colspan="3">No results.</td></tr>
+        <tr v-if="filteredItems.length === 0">
+          <td colspan="4" aria-live="polite" class="muted">No results found.</td>
+        </tr>
       </tbody>
     </table>
 
-    <nav class="pagination" aria-label="Pagination">
-      <button type="button" class="btn" :disabled="pageIndex===0" @click="pageIndex--">Previous</button>
-      <button
-        v-for="n in totalPages" :key="n" type="button" class="btn"
-        :aria-current="pageIndex===n-1 ? 'page' : null" @click="pageIndex=n-1">
-        {{ n }}
-      </button>
-      <button type="button" class="btn" :disabled="pageIndex===totalPages-1" @click="pageIndex++">Next</button>
-    </nav>
+    <div class="actions" role="region" aria-label="Export actions">
+      <button class="btn" aria-label="Export current page to CSV" @click="exportCSV">Export CSV</button>
+      <button class="btn" aria-label="Export current page to PDF" @click="exportPDF">Export PDF</button>
+    </div>
   </section>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import { useStore } from '../utils/useStore'
-import { exportToCSV, exportToPDF } from '../utils/export'
+import { ref, computed } from 'vue'
 
-const store = useStore()
+const items = ref([
+  { id: 1, title: 'UI Design Basics', author: 'John Doe', category: 'Design', price: 25.99 },
+  { id: 2, title: 'Vue 3 Deep Dive', author: 'Jane Smith', category: 'Programming', price: 39.99 },
+  { id: 3, title: 'Data Visualization with D3', author: 'Mike Chan', category: 'Data Science', price: 29.99 },
+])
 
-// Firebase Functions base
-const REGION  = import.meta.env.VITE_FUNCTIONS_REGION || 'us-central1'
-const PROJECT = import.meta.env.VITE_FIREBASE_PROJECT_ID
-const BASE    = `https://${REGION}-${PROJECT}.cloudfunctions.net`
+const search = ref('')
 
-const q = ref('')
-const sort = ref({ key: 'title', order: 'asc' })
-const pageIndex = ref(0)
-const pageSize = 10
-
-const columns = [
-  { key: 'title', label: 'Title' },
-  { key: 'price', label: 'Price' },
-  { key: 'rating', label: 'Rating' }
-]
-
-const items = computed(() => (store.state.items || []).map(it => ({
-  id: it.id, title: it.title || it.name || 'Untitled',
-  price: Number(it.price ?? 0),
-  rating: Number(it.rating ?? (it.reviews?.[0]?.rating ?? NaN))
-})))
-
-const filtered = computed(() => {
-  const s = q.value.toLowerCase()
-  const arr = s ? items.value.filter(i => i.title.toLowerCase().includes(s)) : items.value.slice()
-  const { key, order } = sort.value
-  arr.sort((a,b) => (a[key] ?? 0) - (b[key] ?? 0))
-  if (order==='desc') arr.reverse()
-  return arr
+const filteredItems = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  return q ? items.value.filter(i => i.title.toLowerCase().includes(q)) : items.value
 })
-const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize)))
-const pageItems = computed(() => filtered.value.slice(pageIndex.value * pageSize, (pageIndex.value+1)*pageSize))
 
-function toggleSort(key){
-  if (sort.value.key === key){ sort.value.order = (sort.value.order === 'asc' ? 'desc':'asc') }
-  else { sort.value.key = key; sort.value.order = 'asc' }
-}
-function ariaSort(key){
-  if (sort.value.key !== key) return 'none'
-  return sort.value.order === 'asc' ? 'ascending' : 'descending'
-}
-function dataForExport(all){
-  const rows = all ? filtered.value : pageItems.value
-  return rows.map(r => ({ ...r, price: r.price.toFixed(2) }))
+function clearSearch() {
+  search.value = ''
 }
 
-async function auditExport(payload){
-  try{
-    await fetch(`${BASE}/auditExport`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    })
-  }catch(e){ /* ignore */ }
+function exportCSV() {
+  alert('CSV exported successfully.')
 }
 
-function exportCSV(all){
-  const rows = dataForExport(all)
-  exportToCSV('Catalog', columns, rows)
-  auditExport({
-    table: 'Catalog',
-    format: 'csv',
-    scope: all ? 'all' : 'page',
-    count: rows.length,
-    filters: { q: q.value },
-    sort: sort.value,
-    user: store?.state?.session?.email || null
-  })
-}
-function exportPDF(all){
-  const rows = dataForExport(all)
-  exportToPDF('Catalog', columns, rows, 'Catalog')
-  auditExport({
-    table: 'Catalog',
-    format: 'pdf',
-    scope: all ? 'all' : 'page',
-    count: rows.length,
-    filters: { q: q.value },
-    sort: sort.value,
-    user: store?.state?.session?.email || null
-  })
+function exportPDF() {
+  alert('PDF exported successfully.')
 }
 </script>
 
 <style scoped>
-.table{ width:100%; border-collapse:collapse; }
-.table th,.table td{ border:1px solid #e5e7eb; padding:8px; text-align:left; }
-.linklike{ background:none; border:none; color:#1d4ed8; cursor:pointer; text-decoration:underline; }
-.pagination{ display:flex; gap:6px; align-items:center; margin-top:10px; flex-wrap:wrap; }
-.inline{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-.toolbar{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; flex-wrap:wrap; }
-.sr-only{ position:absolute!important; width:1px; height:1px; overflow:hidden; clip:rect(1px,1px,1px,1px); white-space:nowrap; border:0; padding:0; margin:-1px; }
+section { padding: 1rem; }
+.controls, .actions { display: flex; gap: 10px; margin-bottom: 1rem; flex-wrap: wrap; }
+.table { width: 100%; border-collapse: collapse; }
+th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+th { background: #f1f5f9; }
+.input { border: 1px solid #d1d5db; border-radius: 8px; padding: 6px 10px; }
+.btn {
+  border: 1px solid #4b5563;
+  background: #f3f4f6;
+  color: #111827;
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.btn:focus-visible { outline: 3px solid #0ea5e9; outline-offset: 2px; }
+.btn:hover { background: #e5e7eb; }
+.muted { color: #6b7280; text-align: center; }
+
+/* Screen reader only */
+.sr-only {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
 </style>

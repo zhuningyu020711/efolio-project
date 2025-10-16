@@ -1,123 +1,123 @@
 <template>
-  <section class="card" aria-labelledby="srv-h1">
-    <h2 id="srv-h1">Serverless (Firebase Functions)</h2>
+  <section class="card">
+    <h2>Serverless (Firebase Functions)</h2>
 
-    <!-- 计算示例 /add -->
-    <fieldset class="block">
+    <!-- Adder -->
+    <fieldset class="panel">
       <legend>Adder API</legend>
       <div class="grid2">
-        <div class="field">
-          <label for="a">A</label>
-          <input id="a" type="number" v-model.number="a" />
+        <div>
+          <label class="lbl" for="a">A</label>
+          <input id="a" class="input" type="number" v-model.number="a" />
         </div>
-        <div class="field">
-          <label for="b">B</label>
-          <input id="b" type="number" v-model.number="b" />
+        <div>
+          <label class="lbl" for="b">B</label>
+          <input id="b" class="input" type="number" v-model.number="b" />
         </div>
       </div>
-      <div class="inline">
-        <button type="button" class="btn primary" @click="runAdd">Calculate</button>
-        <span aria-live="polite" class="muted">{{ addStatus }}</span>
+      <div class="row">
+        <button class="btn" @click="calcAdd">Calculate</button>
+        <span v-if="addResult!==null" class="pill">Result: {{ addResult }}</span>
+        <span v-if="addErr" class="err">Load failed</span>
       </div>
-      <p v-if="addError" class="err" role="alert" aria-live="assertive">{{ addError }}</p>
-      <p v-if="sum!==null" class="pill">Result: <strong>{{ sum }}</strong></p>
     </fieldset>
 
-    <!-- 发信示例 /sendMail -->
-    <fieldset class="block">
+    <!-- Send email -->
+    <fieldset class="panel">
       <legend>Send email (via Firebase)</legend>
+      <label class="lbl" for="to">To</label>
+      <input id="to" class="input" v-model.trim="to" placeholder="recipient@example.com" />
 
-      <div class="field">
-        <label for="to">To</label>
-        <input id="to" type="email" v-model.trim="to" required inputmode="email" />
-      </div>
-      <div class="field">
-        <label for="subject">Subject</label>
-        <input id="subject" v-model.trim="subject" required />
-      </div>
-      <div class="field">
-        <label for="msg">Message</label>
-        <textarea id="msg" rows="5" v-model="text" required></textarea>
-      </div>
+      <label class="lbl" for="sub">Subject</label>
+      <input id="sub" class="input" v-model.trim="subject" placeholder="Hello from Firebase Functions" />
 
-      <div class="inline">
-        <button type="button" class="btn primary" @click="sendMail">Send</button>
-        <span class="muted" aria-live="polite">{{ mailStatus }}</span>
+      <label class="lbl" for="msg">Message</label>
+      <textarea id="msg" class="input" rows="5" v-model="message" placeholder="It works!"></textarea>
+
+      <div class="row">
+        <button class="btn" @click="sendMail">Send</button>
+        <span v-if="mailOk" class="pill success">Sent</span>
+        <span v-if="mailErr" class="err">Load failed</span>
       </div>
-      <p v-if="mailError" class="err" role="alert" aria-live="assertive">{{ mailError }}</p>
     </fieldset>
 
-    <!-- 基础信息 -->
-    <details class="block">
+    <!-- Base URL -->
+    <details class="panel">
       <summary>Function base URL</summary>
       <code>{{ BASE }}</code>
     </details>
+
+    <p class="sr-only" aria-live="polite">{{ live }}</p>
   </section>
 </template>
 
 <script setup>
 import { ref } from 'vue'
 
-/** 拼接 Firebase Functions 基础 URL */
 const REGION  = import.meta.env.VITE_FUNCTIONS_REGION || 'us-central1'
-const PROJECT = import.meta.env.VITE_FIREBASE_PROJECT_ID
-const BASE    = `https://${REGION}-${PROJECT}.cloudfunctions.net`
+const PROJECT = import.meta.env.VITE_FIREBASE_PROJECT_ID || ''
+const LOCAL   = import.meta.env.VITE_FUNCTIONS_BASE || ''
+const BASE    = LOCAL || `https://${REGION}-${PROJECT}.cloudfunctions.net`
 
-// /add
 const a = ref(2)
 const b = ref(5)
-const sum = ref(null)
-const addStatus = ref('')
-const addError = ref('')
+const addResult = ref(null)
+const addErr = ref(false)
 
-async function runAdd(){
-  addStatus.value = 'Calling…'
-  addError.value = ''
-  sum.value = null
+const to = ref('')
+const subject = ref('Hello from Firebase Functions')
+const message = ref('It works!')
+const mailOk = ref(false)
+const mailErr = ref(false)
+
+const live = ref('ready')
+
+async function calcAdd(){
+  addErr.value = false; addResult.value = null
   try{
     const url = `${BASE}/add?a=${encodeURIComponent(a.value)}&b=${encodeURIComponent(b.value)}`
-    const r = await fetch(url)
-    const data = await r.json()
-    if (!data.ok) throw new Error(data.error || 'Failed')
-    sum.value = data.sum
-    addStatus.value = 'Done ✅'
+    const r = await fetch(url, { method:'GET' })
+    const j = await r.json()
+    if (!j.ok) throw new Error(j.error || 'add failed')
+    addResult.value = j.result
+    live.value = 'Add success'
   }catch(e){
-    addError.value = e.message || String(e)
-    addStatus.value = ''
+    addErr.value = true
+    live.value = 'Add failed'
   }
 }
 
-// /sendMail
-const to = ref('')
-const subject = ref('Hello from Firebase Functions')
-const text = ref('It works!')
-const mailStatus = ref('')
-const mailError = ref('')
-
 async function sendMail(){
-  mailStatus.value = 'Sending…'
-  mailError.value = ''
+  mailErr.value = false; mailOk.value = false
   try{
-    const r = await fetch(`${BASE}/sendMail`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ to: to.value, subject: subject.value, text: text.value })
+    const url = `${BASE}/sendgrid-proxy`
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: to.value, subject: subject.value, message: message.value })
     })
-    const data = await r.json()
-    if (!data.ok) throw new Error(data.error || 'Failed')
-    mailStatus.value = 'Sent ✅'
+    const j = await r.json()
+    if (!j.ok) throw new Error(j.error || 'mail failed')
+    mailOk.value = true
+    live.value = 'Mail sent'
   }catch(e){
-    mailError.value = e.message || String(e)
-    mailStatus.value = ''
+    mailErr.value = true
+    live.value = 'Mail failed'
   }
 }
 </script>
 
 <style scoped>
-.block{border-top:1px dashed #e5e7eb; padding-top:12px; margin-top:12px}
-.field{display:flex; flex-direction:column; gap:6px; margin-bottom:10px}
-.inline{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
-.grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
-.pill{display:inline-flex; gap:6px; align-items:center; background:#f1f5f9; border:1px solid #e2e8f0; border-radius:999px; padding:4px 8px}
-.err{color:#b91c1c}
+.panel{ border:1px dashed #e5e7eb; border-radius:10px; padding:12px; margin:12px 0 }
+.grid2{ display:grid; grid-template-columns:1fr 1fr; gap:10px }
+@media (max-width: 720px){ .grid2{ grid-template-columns:1fr } }
+.row{ display:flex; gap:10px; align-items:center; margin-top:8px }
+.lbl{ font-weight:600; margin-top:8px; display:block }
+.input{ border:1px solid #d1d5db; border-radius:8px; padding:8px; width:100% }
+.btn{ border:1px solid #475569; background:#f8fafc; color:#111827; border-radius:8px; padding:8px 12px; cursor:pointer }
+.pill{ display:inline-flex; gap:6px; align-items:center; padding:4px 8px; border-radius:999px; background:#f2f2f2; border:1px solid #ccc; font-size:12px }
+.pill.success{ background:#dcfce7; border-color:#16a34a }
+.err{ color:#b91c1c; margin-left:6px }
+.sr-only{ position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden }
+code{ display:inline-block; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:6px 8px; font-size:12px }
 </style>
