@@ -1,177 +1,275 @@
+<!-- src/components/ServerlessDemo.vue -->
 <template>
-  <section class="card" aria-labelledby="srv-h1">
-    <h1 id="srv-h1">Serverless</h1>
+  <section class="wrap card">
+    <h2 class="h2">Serverless</h2>
     <p class="muted">
       This page showcases a serverless feature for the campus event system:
-      <strong>Event Weather (OpenWeather)</strong> — get a same-day forecast for your event
-      by calling a Cloud Function (<code>/eventWeatherOW</code>).
+      <strong>Event Weather (OpenWeather)</strong> — get a same-day forecast by calling a Cloud Function
+      (<code>/eventWeatherOW</code>).
     </p>
 
-    <!-- Event Weather (Cloud Function) -->
-    <fieldset class="box" aria-labelledby="weather-title">
-      <legend id="weather-title">Event Weather (Cloud Function)</legend>
+    <!-- ===== Cloud Function: Event Weather ===== -->
+    <fieldset class="block">
+      <legend>Event Weather (Cloud Function)</legend>
 
-      <div class="row">
-        <div class="cell grow">
-          <label class="lbl" for="lat">Latitude</label>
-          <input id="lat" class="input" v-model.number="lat" placeholder="-37.8136" aria-label="Latitude">
-        </div>
-        <div class="cell grow">
-          <label class="lbl" for="lng">Longitude</label>
-          <input id="lng" class="input" v-model.number="lng" placeholder="144.9631" aria-label="Longitude">
-        </div>
-        <div class="cell">
-          <label class="lbl" for="date">Date</label>
-          <input id="date" class="input" type="date" v-model="date" aria-label="Event date (optional)">
-        </div>
+      <div class="grid">
+        <label class="cell">
+          <span class="lbl">Latitude</span>
+          <input v-model.trim="lat" class="input" type="text" inputmode="decimal" placeholder="-37.8136" />
+        </label>
+
+        <label class="cell">
+          <span class="lbl">Longitude</span>
+          <input v-model.trim="lng" class="input" type="text" inputmode="decimal" placeholder="144.9631" />
+        </label>
+
+        <label class="cell">
+          <span class="lbl">Date</span>
+          <input v-model="date" class="input" type="date" />
+        </label>
       </div>
 
       <div class="row">
-        <button type="button" class="btn" @click="fillCampus" aria-label="Use campus sample">Use campus sample</button>
-        <button type="button" class="btn primary" @click="getWeather" aria-label="Get weather">Get Weather</button>
-        <span class="muted" aria-live="polite">{{ status }}</span>
+        <button class="btn" @click="useCampus">Use campus sample</button>
+        <button class="btn primary" @click="getWeather" :disabled="busy">Get Weather</button>
+        <span class="status" v-if="busy">Loading…</span>
+        <span class="status err" v-else-if="err">{{ err }}</span>
+        <span class="status ok"  v-else-if="okMsg">{{ okMsg }}</span>
       </div>
 
-      <div v-if="daily" class="result">
-        <div class="stats">
-          <span class="pill">Date: <strong>{{ resp.date }}</strong></span>
-          <span class="pill">Max: <strong>{{ daily.t_max }}°C</strong></span>
-          <span class="pill">Min: <strong>{{ daily.t_min }}°C</strong></span>
-          <span class="pill">Rain (day): <strong>{{ daily.precip_sum }} mm</strong></span>
-          <span class="pill">Rain Prob (max): <strong>{{ daily.precip_prob_max }}%</strong></span>
-          <span class="pill">Wind (max): <strong>{{ daily.wind_max }} m/s</strong></span>
-        </div>
+      <details v-if="endpoint" class="ep">
+        <summary>Function base URL</summary>
+        <code>{{ endpoint }}</code>
+      </details>
 
-        <details class="steps">
-          <summary>Hourly (temperature / rain probability / wind)</summary>
-          <div class="hourly">
-            <div v-for="(t,i) in resp.hourly.time" :key="i" class="hour">
-              <div class="time">{{ t.slice(11,16) }}</div>
-              <div class="val">Temp: {{ resp.hourly.temp[i] }}°C</div>
-              <div class="val">Rain: {{ resp.hourly.pop[i] }}%</div>
-              <div class="val">Wind: {{ resp.hourly.wind[i] }} m/s</div>
-              <div class="val">Precip-3h: {{ resp.hourly.precip_3h[i] }} mm</div>
-            </div>
-          </div>
+      <div v-if="view" class="result">
+        <h3 class="h3">Forecast</h3>
+        <ul>
+          <li><strong>Summary:</strong> {{ view.summary || '-' }}</li>
+          <li><strong>Temp:</strong> {{ fmt(view.temp) }} °C</li>
+          <li><strong>Wind:</strong> {{ fmt(view.wind) }} m/s</li>
+          <li><strong>Time:</strong> {{ view.time || (date || '') }}</li>
+        </ul>
+
+        <details class="raw">
+          <summary>Raw response (JSON)</summary>
+          <pre class="pre">{{ resultRaw }}</pre>
         </details>
       </div>
     </fieldset>
 
-    <!-- Public API Explorer — /eventWeatherOW -->
-    <fieldset class="box" aria-labelledby="api-title">
-      <legend id="api-title">Public API Explorer — <code>/eventWeatherOW</code></legend>
+    <!-- ===== Public API Explorer ===== -->
+    <fieldset class="block">
+      <legend>Public API Explorer — /eventWeatherOW</legend>
 
-      <div class="row">
-        <div class="cell grow">
-          <label class="lbl" for="a-lat">Latitude</label>
-          <input id="a-lat" class="input" v-model="api.lat">
-        </div>
-        <div class="cell grow">
-          <label class="lbl" for="a-lng">Longitude</label>
-          <input id="a-lng" class="input" v-model="api.lng">
-        </div>
-        <div class="cell">
-          <label class="lbl" for="a-date">Date</label>
-          <input id="a-date" class="input" type="date" v-model="api.date">
-        </div>
+      <div class="grid">
+        <label class="cell">
+          <span class="lbl">Latitude</span>
+          <input v-model.trim="xLat" class="input" type="text" inputmode="decimal" />
+        </label>
+
+        <label class="cell">
+          <span class="lbl">Longitude</span>
+          <input v-model.trim="xLng" class="input" type="text" inputmode="decimal" />
+        </label>
+
+        <label class="cell">
+          <span class="lbl">Date</span>
+          <input v-model="xDate" class="input" type="date" />
+        </label>
       </div>
 
       <div class="row">
-        <button type="button" class="btn" @click="fillApiSample">Use campus sample</button>
-        <button type="button" class="btn" @click="openApi">Open in new tab</button>
-        <button type="button" class="btn" @click="fetchApi">Fetch here</button>
+        <button class="btn" @click="fillExplorer">Use campus sample</button>
+        <button class="btn" @click="openInNew">Open in new tab</button>
+        <button class="btn" @click="fetchHere" :disabled="xBusy">Fetch here</button>
       </div>
 
-      <label class="lbl" for="urlBox">Example endpoint</label>
-      <input id="urlBox" class="input mono" :value="apiUrl" readonly>
+      <div class="mini">
+        <span class="lbl">Example endpoint</span>
+        <input class="input mono" :value="exampleUrl" readonly />
+      </div>
 
-      <pre v-if="apiOut" class="out" aria-live="polite">{{ apiOut }}</pre>
+      <details v-if="xJson" class="raw">
+        <summary>Response</summary>
+        <pre class="pre">{{ xJson }}</pre>
+      </details>
     </fieldset>
-
-    <details class="box">
-      <summary>Function base URL</summary>
-      <code class="mono">{{ BASE }}/eventWeatherOW?lat=-37.8136&lng=144.9631&date={{ today }}</code>
-    </details>
   </section>
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, computed } from 'vue'
 
+/* ---------- Env & Base URL ---------- */
 const REGION  = import.meta.env.VITE_FUNCTIONS_REGION || 'us-central1'
 const PROJECT = import.meta.env.VITE_FIREBASE_PROJECT_ID || ''
-const BASE    = `https://${REGION}-${PROJECT}.cloudfunctions.net`
+const FUNCS_BASE =
+  import.meta.env.VITE_FUNCS_BASE ||
+  (REGION && PROJECT ? `https://${REGION}-${PROJECT}.cloudfunctions.net` : '')
 
-const lat   = ref(-37.8136)
-const lng   = ref(144.9631)
-const today = new Date().toISOString().slice(0,10)
-const date  = ref(today)
+/* ---------- Form state ---------- */
+const lat  = ref('-37.8136')
+const lng  = ref('144.9631')
+const date = ref(new Date().toISOString().slice(0, 10))
 
-const status = ref('')
-const resp   = ref(null)
-const daily  = computed(() => resp.value?.daily || null)
+const busy  = ref(false)
+const err   = ref('')
+const okMsg = ref('')
+const view  = ref(null)     // 解析后的可读结果
+const resultRaw = ref('')
 
-function fillCampus(){
-  lat.value = -37.8136
-  lng.value = 144.9631
-  date.value = today
+const endpoint = computed(() => FUNCS_BASE ? `${FUNCS_BASE}/eventWeatherOW` : '(Missing VITE_FUNCS_BASE / REGION+PROJECT)')
+
+function useCampus () {
+  lat.value = '-37.8136'
+  lng.value = '144.9631'
+  date.value = new Date().toISOString().slice(0, 10)
 }
 
-async function getWeather(){
-  status.value = 'Loading…'
-  resp.value = null
-  try{
-    const q = new URLSearchParams({
-      lat: String(lat.value),
-      lng: String(lng.value),
-      date: date.value || ''
-    })
-    const r = await fetch(`${BASE}/eventWeatherOW?${q.toString()}`)
-    const j = await r.json()
-    if (!j.ok) { status.value = `Failed: ${j.error || 'Unknown error'}`; return }
-    resp.value = j
-    status.value = 'OK'
-  }catch(e){
-    status.value = `Failed: ${e.message}`
+/* ---------- 工具：显示数字 ---------- */
+function fmt (n) {
+  if (n === null || n === undefined || Number.isNaN(Number(n))) return '-'
+  const v = Number(n)
+  return Math.abs(v) >= 10 ? v.toFixed(0) : v.toFixed(1)
+}
+
+/* ---------- 统一解析后端返回 ---------- */
+function toView(j) {
+  // 1) 你现在后端的常见结构：today + raw
+  const t = j?.today || {}
+  const first = j?.raw?.list?.[0] || {}
+
+  const summary =
+    t.desc ||
+    first?.weather?.[0]?.description ||
+    j?.weather?.description ||
+    j?.description ||
+    j?.summary || ''
+
+  const temp =
+    t.temp ??
+    j?.temp ??
+    first?.main?.temp ??
+    j?.main?.temp
+
+  const wind =
+    (t.wind && (t.wind.speed ?? t.wind)) ??
+    (j?.wind && j.wind.speed) ??
+    first?.wind?.speed ??
+    j?.wind_speed
+
+  const time =
+    t.at ||
+    j?.time ||
+    first?.dt_txt ||
+    j?.dt_txt ||
+    j?.date
+
+  return { summary, temp, wind, time }
+}
+
+/* ---------- Call function ---------- */
+async function getWeather () {
+  err.value = ''; okMsg.value = ''; view.value = null; resultRaw.value = ''
+  if (!FUNCS_BASE) { err.value = 'Function base URL is empty. Check .env: VITE_FUNCS_BASE or REGION/PROJECT.'; return }
+
+  const _lat = Number(String(lat.value).trim())
+  const _lng = Number(String(lng.value).trim())
+  if (Number.isNaN(_lat) || Number.isNaN(_lng)) { err.value = 'Missing lat/lon'; return }
+
+  // 同时带 lng & lon
+  const q = new URLSearchParams({
+    lat : String(_lat),
+    lng : String(_lng),
+    lon : String(_lng),
+    date: (date.value || '').slice(0, 10)
+  })
+  const url = `${FUNCS_BASE}/eventWeatherOW?${q.toString()}`
+  busy.value = true
+  try {
+    const r = await fetch(url)
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok || j.ok === false) {
+      throw new Error(j.error || `HTTP ${r.status}`)
+    }
+    view.value = toView(j)
+    resultRaw.value = JSON.stringify(j, null, 2)
+    okMsg.value = 'Success'
+  } catch (e) {
+    err.value = String(e.message || e)
+  } finally {
+    busy.value = false
   }
 }
 
-/* ---- API Explorer ---- */
-const api = reactive({ lat: String(lat.value), lng: String(lng.value), date: date.value })
-const apiUrl = computed(() => {
-  const q = new URLSearchParams({ lat: api.lat, lng: api.lng, date: api.date || '' })
-  return `${BASE}/eventWeatherOW?${q.toString()}`
-})
-const apiOut = ref('')
+/* ---------- Explorer ---------- */
+const xLat  = ref(lat.value)
+const xLng  = ref(lng.value)
+const xDate = ref(date.value)
+const xBusy = ref(false)
+const xJson = ref('')
 
-function fillApiSample(){ api.lat = String(lat.value); api.lng = String(lng.value); api.date = date.value }
-function openApi(){ window.open(apiUrl.value, '_blank') }
-async function fetchApi(){
-  apiOut.value = 'Loading…'
-  try{
-    const r = await fetch(apiUrl.value)
-    const j = await r.json()
-    apiOut.value = JSON.stringify(j, null, 2)
-  }catch(e){ apiOut.value = `Error: ${e.message}` }
+const exampleUrl = computed(() => {
+  if (!FUNCS_BASE) return ''
+  const _lat = Number(String(xLat.value || '').trim())
+  const _lng = Number(String(xLng.value || '').trim())
+  const q = new URLSearchParams({
+    lat : String(_lat),
+    lng : String(_lng),
+    lon : String(_lng),
+    date: (xDate.value || '').slice(0, 10)
+  })
+  return `${FUNCS_BASE}/eventWeatherOW?${q.toString()}`
+})
+
+function fillExplorer () {
+  xLat.value  = '-37.8136'
+  xLng.value  = '144.9631'
+  xDate.value = new Date().toISOString().slice(0, 10)
+}
+
+function openInNew () {
+  if (!exampleUrl.value) return
+  window.open(exampleUrl.value, '_blank')
+}
+
+async function fetchHere () {
+  xBusy.value = true
+  xJson.value = ''
+  try {
+    const r = await fetch(exampleUrl.value)
+    const j = await r.json().catch(() => ({}))
+    xJson.value = JSON.stringify(j, null, 2)
+  } catch (e) {
+    xJson.value = `ERROR: ${String(e.message || e)}`
+  } finally {
+    xBusy.value = false
+  }
 }
 </script>
 
 <style scoped>
-.muted{color:#6b7280}
+.wrap{max-width:980px;margin:18px auto}
 .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px}
-.box{border:1px dashed #e5e7eb;border-radius:12px;padding:12px;margin:12px 0}
-.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.h2{margin:0 0 6px}
+.h3{margin:12px 0 6px}
+.muted{color:#6b7280;margin:0 0 10px}
+.block{border-top:1px dashed #e5e7eb;margin-top:14px;padding-top:12px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .cell{display:flex;flex-direction:column;gap:6px}
-.cell.grow{flex:1 1 260px}
 .lbl{font-weight:600}
-.input{border:1px solid #d1d5db;border-radius:8px;padding:8px}
-.mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace}
+.input{border:1px solid #cbd5e1;border-radius:8px;padding:8px}
+.input.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.row{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
 .btn{border:1px solid #cbd5e1;background:#f3f4f6;border-radius:8px;padding:8px 12px;cursor:pointer}
-.btn.primary{background:#1d4ed8;color:#fff;border:none}
-.pill{display:inline-flex;gap:6px;align-items:center;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:999px;padding:2px 8px}
-.stats{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
-.steps{margin-top:8px}
-.hourly{display:grid;grid-template-columns:repeat(auto-fill, minmax(160px,1fr));gap:8px;margin-top:8px}
-.hour{border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fafafa}
-.out{white-space:pre-wrap;background:#0b1020;color:#e6edf3;border-radius:8px;padding:10px;overflow:auto}
+.btn.primary{background:#2563eb;color:#fff;border-color:#2563eb}
+.status{font-size:14px}
+.status.ok{color:#16a34a}
+.status.err{color:#b91c1c}
+.result ul{margin:0 0 8px 16px}
+.pre{background:#0b1020;color:#e5e7eb;border-radius:8px;padding:10px;overflow:auto}
+.raw{margin-top:8px}
+.ep{margin-top:8px}
+@media (max-width:860px){ .grid{grid-template-columns:1fr} }
 </style>
