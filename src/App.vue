@@ -30,7 +30,7 @@
 
   <main id="main" class="wrap" role="main" tabindex="-1">
 
-    <!-- 🏠 Home Page -->
+    <!-- 🏠 Home -->
     <section v-if="page==='home'" class="card hero" aria-labelledby="home-h1">
       <h1 id="home-h1" class="headline">
         Make Campus Events <span class="grad">Effortless</span>
@@ -84,7 +84,7 @@
         <article class="feature-card" role="listitem">
           <div class="ico">📈</div>
           <h3>Dashboard</h3>
-          <p>Visual analytics, QR check-in, and AI copy generation.</p>
+          <p>Charts, QR check-in, and quick navigation to events.</p>
         </article>
       </div>
 
@@ -126,10 +126,23 @@
     <!-- Dashboard -->
     <section v-else-if="page==='dashboard'" class="card" aria-labelledby="dash-h1">
       <h1 id="dash-h1">Dashboard</h1>
-      <p v-if="!store.state.session" class="muted">Please log in.</p>
+
+      <div v-if="!store.state.session" class="muted">Please log in.</div>
       <div v-else>
-        <EventDashboard :events="store.state.items" :attendance="store.state.attendance" />
+        <!-- 把数据传进仪表盘；提供 open-checkin 事件跳转 -->
+        <EventDashboard
+          :events="events"
+          :attendance="attendance"
+          :session="store.state.session"
+          @open-checkin="go('checkin')"
+        />
       </div>
+    </section>
+
+    <!-- Check-in (扫码/签到) -->
+    <section v-else-if="page==='checkin'" class="card" aria-labelledby="check-h1">
+      <h1 id="check-h1">Check-in</h1>
+      <Checkin :items="events" :attendance="attendance" />
     </section>
 
     <!-- Admin -->
@@ -140,17 +153,24 @@
         <Admin />
       </div>
     </section>
+    <section v-else-if="page==='checkin'" class="card">
+  <Checkin @back="go('home')" />
+</section>
+
 
     <!-- fallback -->
     <section v-else class="card" aria-labelledby="nf-h1">
       <h1 id="nf-h1">Not found</h1>
     </section>
+    
+
   </main>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useStore } from './utils/useStore'
+
 import Auth from './components/Auth.vue'
 import Admin from './components/Admin.vue'
 import Catalog from './components/Catalog.vue'
@@ -158,11 +178,16 @@ import Email from './components/Email.vue'
 import MapView from './components/Map.vue'
 import ServerlessDemo from './components/ServerlessDemo.vue'
 import EventDashboard from './components/EventDashboard.vue'
+import Checkin from './components/Checkin.vue'
 
 const store = useStore()
 const page = ref('home')
 const isAdmin = store.isAdmin
 const liveMsg = ref('Home view')
+
+// 保障 props 总是可用
+const events = computed(() => Array.isArray(store.state.items) ? store.state.items : [])
+const attendance = computed(() => Array.isArray(store.state.attendance) ? store.state.attendance : [])
 
 function go(name){
   page.value = name
