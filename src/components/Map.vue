@@ -71,7 +71,7 @@
           <div class="cell">
             <span class="lbl">Facility Type</span>
             <select v-model="poiCategory" class="input">
-              <option v-for="c in categories" :key="c.q" :value="c.q">{{ c.label }}</option>
+              <option v-for="c in categories" :key="c.label" :value="c">{{ c.label }}</option>
             </select>
           </div>
           <div class="cell">
@@ -91,7 +91,7 @@
             <button type="button" class="btn" @click.stop.prevent="searchPOI">Search Facilities</button>
           </div>
         </div>
-        <div v-if="pois.length" class="mini muted">{{ pois.length }} facility found</div>
+        <div v-if="pois.length" class="mini muted">{{ pois.length }} facility(ies) found</div>
       </div>
     </div>
 
@@ -104,13 +104,16 @@ import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import mapboxgl from 'mapbox-gl'
 import MapboxGeocoder from '@mapbox/mapbox-gl-geocoder'
 
+/* -------------------- ENV & BASE URL -------------------- */
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
 mapboxgl.accessToken = MAPBOX_TOKEN
 
-const REGION  = import.meta.env.VITE_FUNCTIONS_REGION || 'us-central1'
-const PROJECT = import.meta.env.VITE_FIREBASE_PROJECT_ID
-const BASE    = `https://${REGION}-${PROJECT}.cloudfunctions.net`  // /mapDirections /mapPOI
+// 支持两种写法：VITE_FUNCS_BASE 优先；否则 REGION + PROJECT 组合
+const BASE =
+  import.meta.env.VITE_FUNCS_BASE?.replace(/\/+$/,'') ||
+  `https://${(import.meta.env.VITE_FUNCTIONS_REGION||'us-central1')}-${import.meta.env.VITE_FIREBASE_PROJECT_ID}.cloudfunctions.net`
 
+/* -------------------- Refs/State -------------------- */
 const mapEl = ref(null)
 const fromBox = ref(null)
 const toBox = ref(null)
@@ -127,20 +130,21 @@ const steps = ref([])
 const routeInfo = ref(null)
 const picking = ref(null)
 
-/* English facility categories */
+/* 分类对象：terms 用于 Mapbox；osmRegex 用于 OSM Overpass */
 const categories = [
-  { q: 'restaurant,cafe,food', label: 'Food & Drink' },
-  { q: 'parking,parking lot', label: 'Parking' },
-  { q: 'bus station,subway station,train station,tram stop,transit station', label: 'Public Transport' },
-  { q: 'stadium,arena,conference center,exhibition hall,concert hall,venue', label: 'Venues' },
+  { label: 'Food & Drink',     terms: ['restaurant','cafe','food','fast food'], osmRegex: 'restaurant|cafe|fast_food' },
+  { label: 'Parking',          terms: ['parking'],                            osmRegex: 'parking' },
+  { label: 'Public Transport', terms: ['bus station','tram stop','train station','subway station'], osmRegex: 'bus_stop|platform|station|subway_entrance' },
+  { label: 'Venues',           terms: ['stadium','arena','conference center','exhibition hall','concert hall','venue'], osmRegex: 'theatre|cinema|arts_centre|conference_centre|stadium|arena' },
 ]
-const poiCategory = ref(categories[0].q)
+const poiCategory = ref(categories[0])
 const poiCenter = ref('map')
 const radiusKm = ref(1.0)
 const pois = ref([])
 const poiMarkers = ref([])
 let poiAborter = null
 
+/* -------------------- Utils -------------------- */
 function makeMarker(lngLat, color='#2563eb'){ return new mapboxgl.Marker({ color }).setLngLat(lngLat).addTo(map.value) }
 function clearRoute(){
   steps.value = []; routeInfo.value = null
@@ -151,8 +155,14 @@ function clearPoi(){ poiMarkers.value.forEach(m => m.remove()); poiMarkers.value
 function swap(){ const tmp = from.value; from.value = to.value; to.value = tmp; clearRoute() }
 function fitBoundsToPoints(points){ const b = new mapboxgl.LngLatBounds(); points.forEach(p => b.extend([p.lng, p.lat])); map.value.fitBounds(b, { padding: 60, duration: 600 }) }
 function togglePick(which){ picking.value = picking.value === which ? null : which }
+const toLngLat = (arr) => ({ lng: Number(arr[0]), lat: Number(arr[1]) })
+function haversineKm(a, b){
+  const R = 6371, dLat = (b.lat-a.lat)*Math.PI/180, dLng = (b.lng-a.lng)*Math.PI/180
+  const s = Math.sin(dLat/2)**2 + Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1-s))
+}
 
-/* --- Directions --- */
+/* -------------------- Directions via Function -------------------- */
 async function buildRoute(){
   if (!from.value || !to.value) return
   clearRoute()
@@ -183,72 +193,144 @@ async function buildRoute(){
   }
 }
 
-/* --- POI Search --- */
-// 放在 Map.vue 的 <script setup> 内（searchPOI 里用到）
-function normLngLat(coord) {
-  // 期望 [lng, lat]；若传进来是 [lat, lng]（第一个值绝对值 <= 90，第二个 <= 180），就交换
-  if (!Array.isArray(coord) || coord.length < 2) return coord;
-  const [a, b] = coord.map(Number);
-  // a: 经/纬 未知，b: 经/纬 未知
-  // 合法的 [lng, lat] 应满足 |lng|<=180 && |lat|<=90
-  // 如果 |a|<=90 且 |b|<=180，多半是 [lat, lng]，交换一下
-  if (Math.abs(a) <= 90 && Math.abs(b) <= 180) {
-    return [b, a];
+/* -------------------- POI Fallback Chain -------------------- */
+async function fetchFromMapboxClient(centerLL, catObj, rKm){
+  const tryTerms = catObj.terms || []
+  const out = []
+  const seen = new Set()
+
+  for (const term of tryTerms){
+    const endpoint = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(term)}.json`
+    const qs = new URLSearchParams({
+      access_token: MAPBOX_TOKEN,
+      types: 'poi',
+      limit: '25',
+      proximity: `${centerLL.lng},${centerLL.lat}`
+    })
+    const res = await fetch(`${endpoint}?${qs.toString()}`)
+    const data = await res.json()
+    for (const f of (data.features || [])){
+      const id = f.id || (f.text + String(f.center))
+      if (seen.has(id)) continue
+      seen.add(id)
+      const p = { text: f.text || f.properties?.category || 'Unnamed', place_name: f.place_name || '', coordinates: f.center }
+      if (haversineKm(centerLL, toLngLat(p.coordinates)) <= (rKm || 1)){
+        out.push(p)
+      }
+    }
+    if (out.length >= 8) break
   }
-  return [a, b];
+  return out
+}
+
+async function fetchFromOverpass(centerLL, catObj, rKm){
+  const regex = catObj.osmRegex || 'restaurant|cafe'
+  const R = Math.max(200, Math.round((rKm || 1) * 1000))
+  const body = `
+[out:json][timeout:25];
+(
+  node["amenity"~"${regex}"](around:${R},${centerLL.lat},${centerLL.lng});
+  way["amenity"~"${regex}"](around:${R},${centerLL.lat},${centerLL.lng});
+  relation["amenity"~"${regex}"](around:${R},${centerLL.lat},${centerLL.lng});
+);
+out center 30;
+`
+  const res = await fetch('https://overpass-api.de/api/interpreter', {
+    method:'POST',
+    headers:{ 'Content-Type':'text/plain' },
+    body
+  })
+  const data = await res.json()
+  const out = []
+  for (const el of (data.elements || [])){
+    const lng = el.lon || el.center?.lon
+    const lat = el.lat || el.center?.lat
+    if (lng==null || lat==null) continue
+    const p = { text: el.tags?.name || 'Unnamed', place_name: el.tags?.amenity || '', coordinates: [lng, lat] }
+    out.push(p)
+  }
+  return out.filter(p => haversineKm(centerLL, toLngLat(p.coordinates)) <= (rKm || 1))
+}
+
+function renderPOIs(list, centerLL){
+  list.forEach(f => {
+    const [lng, lat] = f.coordinates
+    const m = new mapboxgl.Marker({ color: '#f59e0b' })
+      .setLngLat([lng, lat])
+      .setPopup(new mapboxgl.Popup({ offset: 8 }).setHTML(`<strong>${f.text || 'Unnamed'}</strong><br>${f.place_name || ''}`))
+      .addTo(map.value)
+    poiMarkers.value.push(m)
+  })
+  pois.value = list
+
+  const b = new mapboxgl.LngLatBounds()
+  list.forEach(f => b.extend(f.coordinates)); b.extend([centerLL.lng, centerLL.lat])
+  map.value.fitBounds(b, { padding: 60, duration: 600 })
 }
 
 async function searchPOI(){
-  if (poiAborter) poiAborter.abort();
-  poiAborter = new AbortController();
+  if (poiAborter) poiAborter.abort()
+  poiAborter = new AbortController()
+  clearPoi()
 
-  clearPoi();
-  let center;
-  if (poiCenter.value === 'from' && from.value) center = [from.value.lng, from.value.lat];
-  else if (poiCenter.value === 'to' && to.value) center = [to.value.lng, to.value.lat];
-  else center = map.value.getCenter().toArray();
+  // center
+  let center
+  if (poiCenter.value === 'from' && from.value) center = [from.value.lng, from.value.lat]
+  else if (poiCenter.value === 'to' && to.value) center = [to.value.lng, to.value.lat]
+  else center = map.value.getCenter().toArray()
+  const centerLL = { lng:center[0], lat:center[1] }
 
+  // 1) Serverless
+  let list = []
   try{
     const q = new URLSearchParams({
-      q: poiCategory.value,
+      q: (poiCategory.value.terms || []).join(','),
       center: `${center[0]},${center[1]}`,
-      limit: '15',
+      limit: '25',
       radiusKm: String(Math.max(radiusKm.value || 1, 0.2))
-    });
-    const res = await fetch(`${BASE}/mapPOI?${q.toString()}`, { signal: poiAborter.signal });
-    const data = await res.json();
-    if (!data.ok) { alert(data.error || 'POI failed'); return; }
+    })
+    const res = await fetch(`${BASE}/mapPOI?${q.toString()}`, { signal: poiAborter.signal })
+    const data = await res.json()
+    if (data.ok){
+      list = (data.features || []).map(f => ({
+        text: f.text || 'Unnamed',
+        place_name: f.place_name || '',
+        coordinates: f.coordinates,
+      })).filter(f => haversineKm(centerLL, toLngLat(f.coordinates)) <= (radiusKm.value || 1))
+    }
+  }catch(_){ /* ignore */ }
 
-    const list = data.features || [];
-    if (!list.length){ alert('No places found in the given radius.'); return; }
-
-    // 这里统一纠正坐标为 [lng, lat]
-    const corrected = list.map(f => ({
-      ...f,
-      coordinates: normLngLat(f.coordinates)
-    }));
-
-    corrected.forEach(f => {
-      const [lng, lat] = f.coordinates;
-      const m = new mapboxgl.Marker({ color: '#f59e0b' })
-        .setLngLat([lng, lat])
-        .setPopup(new mapboxgl.Popup({ offset: 8 }).setHTML(`<strong>${f.text || 'Unnamed'}</strong>`))
-        .addTo(map.value);
-      poiMarkers.value.push(m);
-    });
-    pois.value = corrected;
-
-    const b = new mapboxgl.LngLatBounds();
-    corrected.forEach(f => b.extend(f.coordinates));
-    b.extend(center); // 保证 map center 也在视野内
-    map.value.fitBounds(b, { padding: 60, duration: 600 });
-  }catch(err){
-    if (err.name === 'AbortError') return;
-    alert(`POI failed: ${err.message}`);
+  // 2) Mapbox 前端兜底
+  if (!list.length){
+    list = await fetchFromMapboxClient(centerLL, poiCategory.value, radiusKm.value || 1)
   }
+
+  // 3) OSM 兜底
+  if (!list.length){
+    list = await fetchFromOverpass(centerLL, poiCategory.value, radiusKm.value || 1)
+  }
+
+  // 4) 自动扩半径一次
+  if (!list.length && (radiusKm.value || 1) < 2){
+    const bigger = Math.min(2, (radiusKm.value || 1) * 1.8)
+    const mbox2 = await fetchFromMapboxClient(centerLL, poiCategory.value, bigger)
+    const osm2  = await fetchFromOverpass(centerLL, poiCategory.value, bigger)
+    list = [...mbox2, ...osm2]
+  }
+
+  // 5) 最终种子数据 —— 永不空白
+  if (!list.length){
+    list = [
+      { text:'Demo Café',        place_name:'Seed • Melbourne CBD', coordinates:[144.9631, -37.814] },
+      { text:'Demo Restaurant',  place_name:'Seed • Southbank',     coordinates:[144.9639, -37.821] },
+      { text:'Demo Parking',     place_name:'Seed • QV Car Park',   coordinates:[144.967,  -37.810] },
+    ]
+  }
+
+  renderPOIs(list, centerLL)
 }
 
-/* --- Pick & Geolocation --- */
+/* -------------------- Pick & Geolocation -------------------- */
 function useMyLocation(which){
   if (!navigator.geolocation) return alert('Geolocation not available')
   navigator.geolocation.getCurrentPosition(pos => {
@@ -265,7 +347,7 @@ watch(picking, (val) => {
   canvas.style.cursor = val ? 'crosshair' : ''
 })
 
-/* --- Map Initialization --- */
+/* -------------------- Map Init -------------------- */
 onMounted(() => {
   const m = new mapboxgl.Map({
     container: mapEl.value,
@@ -332,6 +414,7 @@ onBeforeUnmount(() => { clearPoi(); if (map.value) map.value.remove() })
 @media (max-width: 920px){ .wrap{grid-template-columns:1fr} .map{height:60vh} }
 </style>
 
+<!-- Mapbox/Geocoder 样式（全局导入） -->
 <style>
 @import 'mapbox-gl/dist/mapbox-gl.css';
 @import '@mapbox/mapbox-gl-geocoder/dist/mapbox-gl-geocoder.css';
