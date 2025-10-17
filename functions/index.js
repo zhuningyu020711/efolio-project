@@ -164,55 +164,193 @@ exports.mapDirections = onRequest(
   }
 );
 
-/* ========= 4) POI /mapPOI ========= */
-exports.mapPOI = onRequest(
-  { region: 'us-central1', secrets: [MAPBOX_TOKEN] },
+/* ========================================================
+ * POI（附近地点搜索）稳定回退版
+ * ======================================================*/
+ /* ========================================================
+ * POI（附近地点搜索）稳定回退版
+ * ======================================================*/
+/* ========================================================
+ * POI（附近地点搜索）稳定回退版
+ * ======================================================*/
+exports.mapPOI = onRequest({ region: "us-central1", secrets: [MAPBOX_TOKEN] }, async (req, res) => {
+  try {
+    const token = MAPBOX_TOKEN.value();
+    if (!token || !token.startsWith("pk.")) return fail(res, 500, "MAPBOX_TOKEN malformed");
+
+    const qRaw = (req.query.q || "poi").toString(); // e.g. "restaurant"
+    const center = parseLngLatPair(req.query.center);
+    if (!center) return fail(res, 400, "Missing center");
+
+    const limit = Math.min(parseInt(req.query.limit || "15", 10), 25);
+    const radiusKm = Math.max(Number(req.query.radiusKm || "1.2"), 0.2);
+    const bbox = buildBbox(center, radiusKm).join(",");
+
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(qRaw)}.json` +
+      `?proximity=${center[0]},${center[1]}&bbox=${bbox}&types=poi&limit=${limit}&access_token=${token}`;
+
+    logger.info("mapPOI", { url });
+    const r = await fetch(url);
+    const j = await r.json();
+
+    if (!Array.isArray(j.features) || !j.features.length) {
+      return ok(res, { features: [] }); // 不报错，只返回空数组
+    }
+  
+
+    const features = j.features.map(f => ({
+      text: f.text,
+      place_name: f.place_name,
+      coordinates: [f.center[0], f.center[1]],
+    }));
+
+    logger.info("mapPOI features", { count: features.length });
+    return ok(res, { features });
+  } catch (err) {
+    logger.error("mapPOI error", err);
+    return fail(res, 500, err.message || "Internal error");
+  }
+});
+// functions/index.js （追加）
+// ----------------------------------------------------
+// Event Weather (OpenWeather) — /eventWeatherOW
+// Params: lat, lng, date(YYYY-MM-DD)
+// 汇总当日最高/最低温、最大风速、降水总量、最大降水概率(pop)
+// 来源：OpenWeather 5-day / 3-hour forecast (免费档可用)
+// ----------------------------------------------------
+
+
+
+const OPENWEATHER_KEY = defineSecret("OPENWEATHER_KEY");
+
+function ok(res, data) {
+  res.set({
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,OPTIONS",
+  });
+  return res.status(200).send(JSON.stringify({ ok: true, ...data }));
+}
+function fail(res, code = 500, msg = "Internal error") {
+  res.set({
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,OPTIONS",
+  });
+  return res.status(code).send(JSON.stringify({ ok: false, error: msg }));
+}
+function parsePair(v) {
+  if (!v) return null;
+  const [a, b] = v.toString().split(",").map(Number);
+  if (!isFinite(a) || !isFinite(b)) return null;
+  return [a, b];
+}
+
+// /eventWeatherOW?lat=-37.8136&lng=144.9631&date=2025-10-05
+exports.eventWeatherOW = onRequest(
+  { region: "us-central1", secrets: [OPENWEATHER_KEY] },
   async (req, res) => {
     try {
-      if (req.method === 'OPTIONS') return ok(res, {});
-      const token = MAPBOX_TOKEN.value();
-      if (!token || !token.startsWith('pk.')) return fail(res, 500, 'MAPBOX_TOKEN malformed');
+      const lat = Number(req.query.lat);
+      const lng = Number(req.query.lng);
+      const date = (req.query.date || "").toString(); // YYYY-MM-DD
 
-      const qRaw = (req.query.q || 'poi').toString();
-      const center = parseLngLatPair(req.query.center);
-      if (!center) return fail(res, 400, 'Missing center');
+      if (!isFinite(lat) || !isFinite(lng)) {
+        return fail(res, 400, "Missing/invalid lat,lng");
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        // 如果没给日期就用今天（UTC）
+        const d = new Date();
+        const iso = d.toISOString().slice(0, 10);
+        req.query.date = iso;
+      }
+      const target = (req.query.date || "").toString();
 
-      const limit = Math.min(parseInt(req.query.limit || '15', 10), 20);
-      const radiusKm = Math.max(Number(req.query.radiusKm || '1.2'), 0.2);
+      const key = OPENWEATHER_KEY.value();
+      if (!key) return fail(res, 500, "OPENWEATHER_KEY not set");
 
-      const bbox = buildBbox(center, radiusKm).join(',');
-      const common = `proximity=${center[0]},${center[1]}&limit=${limit}&language=en&autocomplete=false&access_token=${token}`;
+      // 5-day / 3-hour 预报
+      // 文档: https://openweathermap.org/forecast5
+      const url =
+        `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lng}` +
+        `&appid=${key}&units=metric`;
 
-      const trials = [
-        { q: qRaw, types: 'poi,poi.landmark', useBbox: true },
-        { q: qRaw, types: 'poi,poi.landmark', useBbox: false },
-        { q: qRaw, types: '', useBbox: false },
-        { q: 'poi', types: 'poi,poi.landmark', useBbox: true },
-      ];
+      const r = await fetch(url);
+      if (!r.ok) {
+        return fail(res, 502, `Upstream error: ${r.status}`);
+      }
+      const j = await r.json();
+      const list = Array.isArray(j.list) ? j.list : [];
 
-      let features = [];
-      for (const t of trials) {
-        const params =
-          `${common}` + (t.types ? `&types=${t.types}` : '') + (t.useBbox ? `&bbox=${bbox}` : '');
-        const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(t.q)}.json?${params}`;
+      // 过滤出目标日期（UTC）数据
+      const dayItems = list.filter(
+        (it) => new Date(it.dt * 1000).toISOString().slice(0, 10) === target
+      );
 
-        const r = await fetch(url);
-        const j = await r.json();
-
-        if (Array.isArray(j.features) && j.features.length) {
-          features = j.features.map(f => ({
-            text: f.text,
-            place_name: f.place_name,
-            coordinates: f.center,
-          }));
-          break;
-        }
+      if (dayItems.length === 0) {
+        // 可能是目标日超出5天窗口；返回可用的最接近的一天提示
+        return ok(res, {
+          message:
+            "No forecast points for the requested date (outside 5-day window). Try a date within 5 days.",
+          date: target,
+          latitude: lat,
+          longitude: lng,
+          daily: null,
+          hourly: null,
+        });
       }
 
-      return ok(res, { features });
+      // 汇总
+      let tMax = -Infinity,
+        tMin = Infinity,
+        windMax = -Infinity,
+        precipSum = 0,
+        popMax = 0;
+
+      const hourly = { time: [], temp: [], wind: [], pop: [], precip_3h: [] };
+
+      for (const it of dayItems) {
+        const t = it.main?.temp;
+        const tmax = it.main?.temp_max;
+        const tmin = it.main?.temp_min;
+        const wind = it.wind?.speed ?? 0;
+        const pop = (it.pop ?? 0) * 100;
+        const rain3h = (it.rain && (it.rain["3h"] || 0)) || 0;
+        const snow3h = (it.snow && (it.snow["3h"] || 0)) || 0;
+        const p3h = rain3h + snow3h;
+
+        if (isFinite(tmax) && tmax > tMax) tMax = tmax;
+        if (isFinite(tmin) && tmin < tMin) tMin = tmin;
+        if (isFinite(wind) && wind > windMax) windMax = wind;
+        if (isFinite(p3h)) precipSum += p3h;
+        if (isFinite(pop) && pop > popMax) popMax = pop;
+
+        hourly.time.push(new Date(it.dt * 1000).toISOString());
+        hourly.temp.push(t ?? null);
+        hourly.wind.push(wind);
+        hourly.pop.push(Math.round(pop));
+        hourly.precip_3h.push(p3h);
+      }
+
+      const out = {
+        ok: true,
+        provider: "openweather",
+        date: target,
+        latitude: lat,
+        longitude: lng,
+        daily: {
+          t_max: isFinite(tMax) ? Math.round(tMax * 10) / 10 : null,
+          t_min: isFinite(tMin) ? Math.round(tMin * 10) / 10 : null,
+          wind_max: isFinite(windMax) ? Math.round(windMax * 10) / 10 : null,
+          precip_sum: Math.round(precipSum * 10) / 10, // mm
+          precip_prob_max: Math.round(popMax), // %
+        },
+        hourly,
+      };
+
+      return ok(res, out);
     } catch (err) {
-      logger.error('mapPOI error', err);
-      return fail(res, 500, err.message);
+      return fail(res, 500, err?.message || "Internal error");
     }
   }
 );

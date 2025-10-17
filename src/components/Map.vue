@@ -184,15 +184,29 @@ async function buildRoute(){
 }
 
 /* --- POI Search --- */
-async function searchPOI(){
-  if (poiAborter) poiAborter.abort()
-  poiAborter = new AbortController()
+// 放在 Map.vue 的 <script setup> 内（searchPOI 里用到）
+function normLngLat(coord) {
+  // 期望 [lng, lat]；若传进来是 [lat, lng]（第一个值绝对值 <= 90，第二个 <= 180），就交换
+  if (!Array.isArray(coord) || coord.length < 2) return coord;
+  const [a, b] = coord.map(Number);
+  // a: 经/纬 未知，b: 经/纬 未知
+  // 合法的 [lng, lat] 应满足 |lng|<=180 && |lat|<=90
+  // 如果 |a|<=90 且 |b|<=180，多半是 [lat, lng]，交换一下
+  if (Math.abs(a) <= 90 && Math.abs(b) <= 180) {
+    return [b, a];
+  }
+  return [a, b];
+}
 
-  clearPoi()
-  let center
-  if (poiCenter.value === 'from' && from.value) center = [from.value.lng, from.value.lat]
-  else if (poiCenter.value === 'to' && to.value) center = [to.value.lng, to.value.lat]
-  else center = map.value.getCenter().toArray()
+async function searchPOI(){
+  if (poiAborter) poiAborter.abort();
+  poiAborter = new AbortController();
+
+  clearPoi();
+  let center;
+  if (poiCenter.value === 'from' && from.value) center = [from.value.lng, from.value.lat];
+  else if (poiCenter.value === 'to' && to.value) center = [to.value.lng, to.value.lat];
+  else center = map.value.getCenter().toArray();
 
   try{
     const q = new URLSearchParams({
@@ -200,36 +214,37 @@ async function searchPOI(){
       center: `${center[0]},${center[1]}`,
       limit: '15',
       radiusKm: String(Math.max(radiusKm.value || 1, 0.2))
-    })
-    const res = await fetch(`${BASE}/mapPOI?${q.toString()}`, { signal: poiAborter.signal })
-    const data = await res.json()
-    if (!data.ok) {
-      alert(data.error || 'POI failed')
-      return
-    }
+    });
+    const res = await fetch(`${BASE}/mapPOI?${q.toString()}`, { signal: poiAborter.signal });
+    const data = await res.json();
+    if (!data.ok) { alert(data.error || 'POI failed'); return; }
 
-    const list = data.features || []
-    if (!list.length){
-      alert('No facilities found within the given radius.')
-      return
-    }
+    const list = data.features || [];
+    if (!list.length){ alert('No places found in the given radius.'); return; }
 
-    list.forEach(f => {
-      const [lng, lat] = f.coordinates
+    // 这里统一纠正坐标为 [lng, lat]
+    const corrected = list.map(f => ({
+      ...f,
+      coordinates: normLngLat(f.coordinates)
+    }));
+
+    corrected.forEach(f => {
+      const [lng, lat] = f.coordinates;
       const m = new mapboxgl.Marker({ color: '#f59e0b' })
         .setLngLat([lng, lat])
         .setPopup(new mapboxgl.Popup({ offset: 8 }).setHTML(`<strong>${f.text || 'Unnamed'}</strong>`))
-        .addTo(map.value)
-      poiMarkers.value.push(m)
-    })
-    pois.value = list
+        .addTo(map.value);
+      poiMarkers.value.push(m);
+    });
+    pois.value = corrected;
 
-    const b = new mapboxgl.LngLatBounds()
-    list.forEach(f => b.extend(f.coordinates)); b.extend(center)
-    map.value.fitBounds(b, { padding: 60, duration: 600 })
+    const b = new mapboxgl.LngLatBounds();
+    corrected.forEach(f => b.extend(f.coordinates));
+    b.extend(center); // 保证 map center 也在视野内
+    map.value.fitBounds(b, { padding: 60, duration: 600 });
   }catch(err){
-    if (err.name === 'AbortError') return
-    alert(`POI failed: ${err.message}`)
+    if (err.name === 'AbortError') return;
+    alert(`POI failed: ${err.message}`);
   }
 }
 
