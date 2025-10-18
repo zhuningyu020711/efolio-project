@@ -124,7 +124,18 @@
             <td>
               <span class="tag" :class="slug(ev.status)">{{ ev.status }}</span>
             </td>
-            <td>{{ ev.rating.toFixed(1) }}</td>
+            <td>
+              <div class="rate-cell">
+                <!-- 交互评分（本用户） -->
+                <StarRating
+                  v-model="ev.myRating"
+                  :label="ev.title"
+                  @update:modelValue="v => onRate(ev.id, v)"
+                />
+                <!-- 平均分显示 -->
+                <span class="avg-num" :title="`Average rating`">{{ ev.avgRating.toFixed(2) }}</span>
+              </div>
+            </td>
           </tr>
           <tr v-if="pageRows.length===0">
             <td colspan="9" class="muted">No results.</td>
@@ -144,6 +155,72 @@
 
 <script setup>
 import { ref, computed, reactive } from 'vue'
+
+/* ---------- 星级评分子组件（纯模板版，无需 JSX 插件） ---------- */
+const StarRating = {
+  name: 'StarRating',
+  inheritAttrs: false,
+  props: {
+    modelValue: { type: Number, default: 0 },
+    label: { type: String, default: 'item' }
+  },
+  emits: ['update:modelValue'],
+  data(){ return { hover: 0 } },
+  computed: {
+    value(){ return Math.min(5, Math.max(0, Number(this.modelValue)||0)) }
+  },
+  methods: {
+    set(n){ this.$emit('update:modelValue', n) },
+    keySet(n, e){ if (e.key === 'Enter') this.set(n) }
+  },
+  template: `
+    <div class="stars" role="group" :aria-label="'Rate ' + label">
+      <button
+        v-for="n in 5"
+        :key="n"
+        class="star"
+        :aria-pressed="n <= value"
+        :aria-label="'Rate ' + n + ' out of 5'"
+        @click="set(n)"
+        @keydown="keySet(n, $event)"
+      >{{ n <= value ? '★' : '☆' }}</button>
+    </div>
+  `
+}
+
+/* ---------- 本地聚合评分存储（localStorage: ratingsIndex） ---------- */
+function getIndex() {
+  try { return JSON.parse(localStorage.getItem('ratingsIndex') || '{}') } catch { return {} }
+}
+function setIndex(idx) { localStorage.setItem('ratingsIndex', JSON.stringify(idx)) }
+function seedIfMissing(id, avg, seedCount = 10) {
+  const idx = getIndex()
+  if (!idx[id]) {
+    idx[id] = { total: Number(avg || 0) * seedCount, count: seedCount, userScore: 0 }
+    setIndex(idx)
+  }
+}
+function getMyRating(id) {
+  const idx = getIndex()
+  return Number(idx[id]?.userScore || 0)
+}
+function setMyRating(id, val) {
+  const idx = getIndex()
+  const rec = idx[id] || { total: 0, count: 0, userScore: 0 }
+  const prev = Number(rec.userScore || 0)
+  const firstTime = prev === 0
+  rec.userScore = val
+  rec.total += (val - prev)
+  if (firstTime) rec.count += 1
+  idx[id] = rec
+  setIndex(idx)
+}
+function getAvgRating(id) {
+  const idx = getIndex()
+  const rec = idx[id]
+  if (!rec || rec.count === 0) return 0
+  return rec.total / rec.count
+}
 
 /* —— Data —— */
 const rows = ref([
@@ -168,6 +245,14 @@ const rows = ref([
   { id: 119, title: 'Jazz Evening', organizer: 'Music Society', category: 'Music', venue: 'Auditorium', date: '2025-04-03T20:00:00', seats:{taken:500,total:500}, price:10, status:'Sold out', rating:4.9 },
   { id: 120, title: 'Thesis Writing Clinic', organizer: 'Graduate School', category: 'Workshop', venue: 'Grad Centre Rm 5', date: '2025-04-04T14:00:00', seats:{taken:35,total:50}, price:0, status:'Open', rating:4.3 },
 ])
+
+/* —— 首次运行：用初始 rating 作为平均分的种子 —— */
+rows.value.forEach(r => seedIfMissing(r.id, r.rating, 10))
+rows.value = rows.value.map(r => ({
+  ...r,
+  myRating: getMyRating(r.id),
+  avgRating: Number(getAvgRating(r.id) || r.rating || 0),
+}))
 
 /* —— Filters / Sorting / Paging —— */
 const q = ref('')
@@ -196,7 +281,7 @@ const filtered = computed(() => {
   }
   if (cat.value) list = list.filter(r => r.category === cat.value)
   if (status.value) list = list.filter(r => r.status === status.value)
-  if (minRating.value) list = list.filter(r => r.rating >= minRating.value)
+  if (minRating.value) list = list.filter(r => (r.avgRating ?? r.rating) >= minRating.value)
   return list
 })
 
@@ -205,6 +290,7 @@ const sorted = computed(() => {
   list.sort((a,b) => {
     const k = sort.key
     let av = a[k], bv = b[k]
+    if (k === 'rating') { av = a.avgRating ?? a.rating; bv = b.avgRating ?? b.rating }
     if (k === 'date') { av = +new Date(a.date); bv = +new Date(b.date) }
     if (typeof av === 'string') { av = av.toLowerCase(); bv = bv.toLowerCase() }
     const cmp = av > bv ? 1 : av < bv ? -1 : 0
@@ -220,6 +306,13 @@ const pageRows = computed(() => {
 })
 function goFirst(){ page.value = 1 }
 
+/* —— 评分变更 —— */
+function onRate(id, v){
+  setMyRating(id, v)
+  const r = rows.value.find(x => x.id === id)
+  if (r) r.avgRating = Number(getAvgRating(id).toFixed(2))
+}
+
 /* —— Export —— */
 function exportCSV(){
   const headers = ['Event','Organizer','Category','Venue','Date','Seats','Price','Status','Rating']
@@ -229,7 +322,7 @@ function exportCSV(){
     `${r.seats.taken}/${r.seats.total}`,
     fmtPrice(r.price),
     r.status,
-    r.rating.toFixed(1)
+    (r.avgRating ?? r.rating).toFixed(2)
   ]))
   const csv = [headers, ...lines]
     .map(row => row.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(','))
@@ -254,12 +347,11 @@ function exportPDF(){
         <td>${r.seats.taken}/${r.seats.total}</td>
         <td>${esc(fmtPrice(r.price))}</td>
         <td>${esc(r.status)}</td>
-        <td>${r.rating.toFixed(1)}</td>
+        <td>${(r.avgRating ?? r.rating).toFixed(2)}</td>
       </tr>
     `
   }).join('')
 
- 
   const html = `<!DOCTYPE html>
   <html>
     <head>
@@ -296,7 +388,6 @@ function exportPDF(){
   w.document.open()
   w.document.write(html)
   w.document.close()
-  // 页面加载后再打印
   w.addEventListener('load', () => {
     try { w.focus(); w.print() } catch {}
   }, { once: true })
@@ -338,4 +429,11 @@ function slug(s){ return String(s).toLowerCase().replace(/\s+/g,'-') }
 .tag.open{background:#e8f5e9;border-color:#a7f3d0}
 .tag.closed{background:#fef3c7;border-color:#fde68a}
 .tag.sold-out{background:#fee2e2;border-color:#fecaca}
+
+/* 评分列样式 */
+.rate-cell{display:flex;align-items:center;gap:8px}
+.stars{display:inline-flex;gap:6px}
+.star{font-size:18px;cursor:pointer;background:transparent;border:none;line-height:1}
+.star:focus-visible{outline:2px solid #0ea5e9;outline-offset:2px;border-radius:4px}
+.avg-num{font-size:12px;color:#475569}
 </style>

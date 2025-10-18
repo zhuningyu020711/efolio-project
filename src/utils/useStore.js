@@ -1,20 +1,19 @@
-// src/utils/useStore.js
 import { reactive, computed } from 'vue'
 import { sanitize } from './sanitize'
 
-// ===== LocalStorage keys =====
 const USERS_KEY   = 'app_users_v1'
 const SESSION_KEY = 'app_session_v1'
 const ITEMS_KEY   = 'app_items_v2'
 
-// ===== Helpers =====
+const DEV_ADMIN_EMAIL = 'admin@demo.local'
+const DEV_ADMIN_PASS  = 'admin123'   // 可自行修改
+
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36)
 const LS = {
   get(k, fb){ try { return JSON.parse(localStorage.getItem(k)) ?? fb } catch { return fb } },
   set(k, v){ localStorage.setItem(k, JSON.stringify(v)) }
 }
 
-// ===== Default items =====
 function defaultItems(){
   return [
     { id: uid(), title:'Intro to Vue 3',         category:'Course',   description:'Build reactive UIs with the Composition API.', reviews:[] },
@@ -23,21 +22,7 @@ function defaultItems(){
   ]
 }
 
-// ===== Seed admin + items =====
 function seed(){
-  const users = LS.get(USERS_KEY, [])
-  if (!users.some(u => u.email === 'admin@demo.local')){
-    const admin = {
-      id: uid(),
-      displayName: 'Administrator',
-      email: 'admin@demo.local',
-      role: 'admin',
-      salt: '',
-      passwordHash: ''
-    }
-    users.push(admin)
-    LS.set(USERS_KEY, users)
-  }
   const existing = LS.get(ITEMS_KEY, null)
   if (!Array.isArray(existing) || existing.length === 0){
     LS.set(ITEMS_KEY, defaultItems())
@@ -45,30 +30,68 @@ function seed(){
 }
 seed()
 
-// ===== Global reactive state =====
 const state = reactive({
   users:   LS.get(USERS_KEY, []),
   session: LS.get(SESSION_KEY, null),
   items:   LS.get(ITEMS_KEY, []),
 })
 
-// ===== Computed =====
 const isAdmin = computed(() => state.session && state.session.role === 'admin')
 
-// ===== Save all =====
 function saveAll(){
   LS.set(USERS_KEY, state.users)
   LS.set(SESSION_KEY, state.session)
   LS.set(ITEMS_KEY, state.items)
 }
 
-// ===== Auth (for local fallback) =====
+/** 记录/更新用户到本地用户表 */
+function upsertUser({ id, email, displayName, role }){
+  if (!email) return
+  const idx = state.users.findIndex(u => u.email === email)
+  const rec = {
+    id: id || uid(),
+    email,
+    displayName: displayName || 'User',
+    role: role || 'user',
+    lastLogin: Date.now()
+  }
+  if (idx === -1) state.users.push(rec)
+  else state.users[idx] = { ...state.users[idx], ...rec }
+  saveAll()
+}
+
+/** Session for Firebase / dev-admin */
+function setSession(sess){
+  state.session = sess
+  upsertUser(sess)
+  saveAll()
+}
+function clearSession(){
+  state.session = null
+  saveAll()
+}
 function logout(){
   state.session = null
   saveAll()
 }
 
-// ===== CRUD =====
+/** 本地管理员后门 */
+function loginDev(email, password){
+  if (email?.trim().toLowerCase() === DEV_ADMIN_EMAIL &&
+      String(password) === DEV_ADMIN_PASS) {
+    const sess = {
+      id: 'dev-admin',
+      displayName: 'Administrator',
+      email: DEV_ADMIN_EMAIL,
+      role: 'admin'
+    }
+    setSession(sess)
+    return true
+  }
+  return false
+}
+
+/** CRUD Items */
 function addItem({ title, category, description }){
   if (!isAdmin.value) throw new Error('Admins only')
   const t = sanitize((title||'').trim())
@@ -86,9 +109,9 @@ function removeItem(id){
   if (i>=0){ state.items.splice(i,1); saveAll() }
 }
 
-// ===== Reviews =====
+/** Reviews */
 function avgRating(item){
-  if (!item.reviews.length) return 0
+  if (!item?.reviews?.length) return 0
   return item.reviews.reduce((a,b)=>a+(b.rating||0),0)/item.reviews.length
 }
 function submitReview(itemId, { rating, comment }){
@@ -107,7 +130,7 @@ function userReviews(){
   return state.items.flatMap(it=>it.reviews).filter(r=>r.byId===state.session.id).sort((a,b)=>b.createdAt - a.createdAt)
 }
 
-// ===== External JSON Loader =====
+/** External JSON loader */
 async function loadExternalData(){
   try {
     const authorsUrl = new URL('../assets/json/authors.json', import.meta.url)
@@ -128,36 +151,21 @@ async function loadExternalData(){
   }catch(e){ console.warn('loadExternalData failed', e) }
 }
 
-// ===== Reset items =====
 function resetItems(){
   state.items = defaultItems()
   saveAll()
 }
 
-// ===== Firebase bridge =====
-function setSession(sess){
-  state.session = sess
-  saveAll()
-}
-function clearSession(){
-  state.session = null
-  saveAll()
-}
-
-// ===== Export =====
 export function useStore(){
   return {
     state,
     isAdmin,
-    logout,
-    addItem,
-    removeItem,
-    submitReview,
-    avgRating,
-    userReviews,
-    loadExternalData,
-    resetItems,
-    setSession,
-    clearSession,
+    // session & auth
+    setSession, clearSession, logout, loginDev,
+    // items & reviews
+    addItem, removeItem,
+    submitReview, avgRating, userReviews,
+    // utils
+    loadExternalData, resetItems,
   }
 }

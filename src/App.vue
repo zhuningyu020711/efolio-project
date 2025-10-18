@@ -7,6 +7,7 @@
     <nav class="hstack" role="navigation" aria-label="Primary">
       <button type="button" class="btn" :aria-current="page==='home' ? 'page' : null" @click="go('home')" aria-label="Go to Home">Home</button>
       <button type="button" class="btn" :aria-current="page==='catalog' ? 'page' : null" @click="go('catalog')" aria-label="Open Catalog">Catalog</button>
+      <button type="button" class="btn" :aria-current="page==='reviews' ? 'page' : null" @click="go('reviews')" aria-label="Open Reviews">Reviews</button>
       <button type="button" class="btn" :aria-current="page==='email' ? 'page' : null" @click="go('email')" aria-label="Open Email">Email</button>
       <button type="button" class="btn" :aria-current="page==='serverless' ? 'page' : null" @click="go('serverless')" aria-label="Open Serverless demos">Serverless</button>
       <button type="button" class="btn" v-if="store.state.session" :aria-current="page==='dashboard' ? 'page' : null" @click="go('dashboard')" aria-label="Open Dashboard">Dashboard</button>
@@ -20,7 +21,7 @@
         </button>
       </template>
       <template v-else>
-        <span class="pill" style="margin-left:4px" aria-live="polite">{{ store.state.session.email || 'user' }}</span>
+        <span class="pill" style="margin-left:4px" aria-live="polite">{{ store.state.session.email || 'user' }} <small>({{ store.state.session.role }})</small></span>
         <button type="button" class="btn danger" aria-label="Log out" @click="onLogout">Logout</button>
       </template>
     </nav>
@@ -30,7 +31,7 @@
 
   <main id="main" class="wrap" role="main" tabindex="-1">
 
-    <!-- 🏠 Home -->
+    <!-- 🏠 Home Page -->
     <section v-if="page==='home'" class="card hero" aria-labelledby="home-h1">
       <h1 id="home-h1" class="headline">
         Make Campus Events <span class="grad">Effortless</span>
@@ -41,7 +42,7 @@
 
       <div class="quick-actions" role="group" aria-label="Quick actions">
         <button class="btn primary lg" @click="go('catalog')" aria-label="Open catalog">Browse Catalog</button>
-        <button class="btn outline lg" @click="go('map')" aria-label="Open map">Open Map</button>
+        <button class="btn outline lg" @click="go('reviews')" aria-label="Open reviews">Open Reviews</button>
         <button class="btn success lg" v-if="store.state.session" @click="go('dashboard')" aria-label="Open dashboard">
           Go to Dashboard
         </button>
@@ -53,41 +54,35 @@
       <div class="features" role="list" aria-label="Key features">
         <article class="feature-card" role="listitem">
           <div class="ico">🔐</div>
-          <h3>Firebase Auth</h3>
-          <p>Clean login/register flow with secure session handling.</p>
+          <h3>Auth & Roles</h3>
+          <p>Login/Register with role-based access. Built-in dev admin.</p>
         </article>
-
         <article class="feature-card" role="listitem">
-          <div class="ico">✉️</div>
-          <h3>Email</h3>
-          <p>Send event updates via EmailJS without exposing backend keys.</p>
+          <div class="ico">⭐</div>
+          <h3>Reviews</h3>
+          <p>Rate & comment; auto average score per item.</p>
         </article>
-
         <article class="feature-card" role="listitem">
           <div class="ico">📊</div>
-          <h3>Interactive Tables</h3>
-          <p>Sortable, filterable data tables for Admin and Catalog views.</p>
+          <h3>Dashboard</h3>
+          <p>Charts, QR check-in and more.</p>
         </article>
-
         <article class="feature-card" role="listitem">
           <div class="ico">⚙️</div>
           <h3>Serverless</h3>
-          <p>Aggregation powered by Cloudflare Workers for scalability.</p>
+          <p>Cloud Functions for weather API etc.</p>
         </article>
-
         <article class="feature-card" role="listitem">
           <div class="ico">🗺️</div>
-          <h3>Mapbox Integration</h3>
-          <p>Event routing, nearby facilities, and live location support.</p>
+          <h3>Mapbox</h3>
+          <p>Routing & POI search with accessibility-minded UI.</p>
         </article>
-
         <article class="feature-card" role="listitem">
-          <div class="ico">📈</div>
-          <h3>Dashboard</h3>
-          <p>Charts, QR check-in, and quick navigation to events.</p>
+          <div class="ico">🧑‍💼</div>
+          <h3>Admin</h3>
+          <p>Manage users and data (admin only).</p>
         </article>
       </div>
-
       <div class="note">
         ☁️ Deployed on Cloudflare Pages · Accessible & Keyboard-Friendly · WCAG-Minded
       </div>
@@ -97,6 +92,12 @@
     <section v-else-if="page==='catalog'" class="card" aria-labelledby="catalog-h1">
       <h1 id="catalog-h1">Catalog</h1>
       <Catalog />
+    </section>
+
+    <!-- Reviews -->
+    <section v-else-if="page==='reviews'" class="card" aria-labelledby="reviews-h1">
+      <h1 id="reviews-h1">Reviews</h1>
+      <Reviews />
     </section>
 
     <!-- Email -->
@@ -126,23 +127,10 @@
     <!-- Dashboard -->
     <section v-else-if="page==='dashboard'" class="card" aria-labelledby="dash-h1">
       <h1 id="dash-h1">Dashboard</h1>
-
-      <div v-if="!store.state.session" class="muted">Please log in.</div>
+      <p v-if="!store.state.session" class="muted">Please log in.</p>
       <div v-else>
-        <!-- 把数据传进仪表盘；提供 open-checkin 事件跳转 -->
-        <EventDashboard
-          :events="events"
-          :attendance="attendance"
-          :session="store.state.session"
-          @open-checkin="go('checkin')"
-        />
+        <EventDashboard />
       </div>
-    </section>
-
-    <!-- Check-in (扫码/签到) -->
-    <section v-else-if="page==='checkin'" class="card" aria-labelledby="check-h1">
-      <h1 id="check-h1">Check-in</h1>
-      <Checkin :items="events" :attendance="attendance" />
     </section>
 
     <!-- Admin -->
@@ -153,24 +141,17 @@
         <Admin />
       </div>
     </section>
-    <section v-else-if="page==='checkin'" class="card">
-  <Checkin @back="go('home')" />
-</section>
-
 
     <!-- fallback -->
     <section v-else class="card" aria-labelledby="nf-h1">
       <h1 id="nf-h1">Not found</h1>
     </section>
-    
-
   </main>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { useStore } from './utils/useStore'
-
 import Auth from './components/Auth.vue'
 import Admin from './components/Admin.vue'
 import Catalog from './components/Catalog.vue'
@@ -178,16 +159,12 @@ import Email from './components/Email.vue'
 import MapView from './components/Map.vue'
 import ServerlessDemo from './components/ServerlessDemo.vue'
 import EventDashboard from './components/EventDashboard.vue'
-import Checkin from './components/Checkin.vue'
+import Reviews from './components/Reviews.vue'
 
 const store = useStore()
 const page = ref('home')
 const isAdmin = store.isAdmin
 const liveMsg = ref('Home view')
-
-// 保障 props 总是可用
-const events = computed(() => Array.isArray(store.state.items) ? store.state.items : [])
-const attendance = computed(() => Array.isArray(store.state.attendance) ? store.state.attendance : [])
 
 function go(name){
   page.value = name
