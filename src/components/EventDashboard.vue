@@ -1,5 +1,6 @@
 <template>
-    <section class="dash" aria-labelledby="dash-h1">
+    <!-- 仅管理员可见 -->
+    <section v-if="isAdmin" class="dash" aria-labelledby="dash-h1">
       <h2 id="dash-h1">Event Dashboard</h2>
   
       <!-- 选择事件 & 图表类型 -->
@@ -133,23 +134,48 @@
   
       <p class="sr-only" aria-live="polite">{{ liveMsg }}</p>
     </section>
+  
+    <!-- 非管理员提示 -->
+    <section v-else class="panel" style="margin:12px">
+      <h3>Admins only</h3>
+      <p class="muted">You must be an administrator to view this dashboard.</p>
+    </section>
   </template>
   
   <script setup>
   import { ref, computed, onMounted, watch } from 'vue'
   import * as echarts from 'echarts'
   import QRCode from 'qrcode'
+  import { rows as localRows } from '../services/rows' // 使用你的 20 条数据
+  import { useStore } from '../utils/useStore'         // ★ 新增
   
+  /* ---------- 仅管理员可见 ---------- */
+  const store = useStore()
+  const session = computed(() => store.state?.session ?? null)
+  const isAdmin = computed(() =>
+    store.isAdmin?.value ||
+    session.value?.role === 'admin' ||
+    (session.value?.email || '').toLowerCase() === 'admin@demo.local'
+  )
+  
+  /* ---------- props ---------- */
   const props = defineProps({
     // 期望：[{ id, title, locationText?, lat?, lng?, stats?: [{date, registered, attended}] }]
     events: { type: Array, default: () => [] },
     attendance: { type: Array, default: () => [] }
   })
   
-  /* ---------- 数据准备（保留你的逻辑，补齐缺省 stats） ---------- */
+  /* ---------- 数据准备：优先 props.events，否则由 20 条 rows 生成 ---------- */
   const eventList = computed(() => {
-    const src = props.events?.length ? props.events : demoEvents()
-    return src.map(ev => {
+    const fromProps = Array.isArray(props.events) && props.events.length > 0
+      ? props.events
+      : localRows.map(r => ({
+          id: r.id,
+          title: r.title,
+          locationText: `${r.venue} · ${r.organizer}`,
+          stats: makeWeekStats()
+        }))
+    return fromProps.map(ev => {
       const cloned = { ...ev }
       if (!cloned.stats || !cloned.stats.length) cloned.stats = makeWeekStats()
       return cloned
@@ -174,6 +200,7 @@
   const avgRate  = computed(() => totalReg.value ? Math.round((totalAtt.value / totalReg.value) * 100) : 0)
   
   function refreshChart () {
+    if (!isAdmin.value) return
     if (!currentEvent.value || !chartEl.value) return
     if (!chart) chart = echarts.init(chartEl.value)
   
@@ -204,10 +231,11 @@
   }
   
   onMounted(() => {
+    if (!isAdmin.value) return
     refreshChart()
     window.addEventListener('resize', () => chart?.resize())
   })
-  watch([selectedId, chartType, currentEvent], () => refreshChart())
+  watch([selectedId, chartType, currentEvent, isAdmin], () => refreshChart())
   
   /* ---------- 导航 ---------- */
   const originPick = ref('myloc') // myloc | dorm | lecture
@@ -235,29 +263,45 @@
   const qrDataUrl = ref('')
   const qrPayload = ref('')
   async function makeQR () {
-  const ev = currentEvent.value
-  if (!ev) return
-
-  // 1) 生成要携带的最小 payload
-  const payload = { type: 'attendance', eventId: ev.id, ts: Date.now() }
-  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
-
-  // 2) 生成跳转 URL（支持本地 & 线上），走 hash 路由：#/checkin?p=...
-  const base = `${window.location.origin}${window.location.pathname}`
-  const url = `${base}#/checkin?p=${encodeURIComponent(b64)}`
-
-  // 3) 用 URL 生成二维码
-  qrPayload.value = url
-  qrDataUrl.value = await QRCode.toDataURL(url, { margin: 2, width: 256 })
-  liveMsg.value = 'QR generated'
-}
-
-  /* ---------- AI 文案&海报提示 ---------- */
+    const ev = currentEvent.value
+    if (!ev) return
+    const payload = { type: 'attendance', eventId: ev.id, ts: Date.now() }
+    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
+    const base = `${window.location.origin}${window.location.pathname}`
+    const url = `${base}#/checkin?p=${encodeURIComponent(b64)}`
+    qrPayload.value = url
+    qrDataUrl.value = await QRCode.toDataURL(url, { margin: 2, width: 256 })
+    liveMsg.value = 'QR generated'
+  }
+  function downloadQR(){
+    const a = document.createElement('a')
+    a.href = qrDataUrl.value
+    a.download = `checkin-${currentEvent.value?.id || 'event'}.png`
+    a.click()
+  }
+  
+  /* ---------- demo 工具 ---------- */
+  function makeWeekStats(min=10, max=40){
+    const out = []
+    const now = new Date()
+    for (let i=6;i>=0;i--){
+      const d = new Date(now); d.setDate(now.getDate()-i)
+      const date = d.toISOString().slice(0,10)
+      const registered = rand(min, max)
+      const attended   = Math.max(0, registered - rand(0, Math.floor(registered*0.3)))
+      out.push({ date, registered, attended })
+    }
+    return out
+  }
+  function rand(a,b){ return Math.floor(Math.random()*(b-a+1))+a }
+  function guessDateRange(ev){
+    const first = ev.stats?.[0]?.date, last = ev.stats?.[ev.stats.length-1]?.date
+    return (first && last) ? `${first} ~ ${last}` : 'See schedule'
+  }
   const tone = ref('friendly')
   const tags = ref('')
   const descDraft = ref('')
   const posterPrompt = ref('')
-  
   function genCopy(){
     const ev = currentEvent.value
     if (!ev) return
@@ -285,80 +329,32 @@
   `Poster for "${ev.title}", bold typographic title, vibrant color palette, friendly campus vibe, clean layout, high contrast, minimal icons, ${t}, aspect ratio 4:5`
     liveMsg.value = 'Poster prompt generated'
   }
-  
-  /* ---------- demo 数据 ---------- */
-  function demoEvents(){
-    return [
-      { id: 'e1', title: 'Welcome BBQ', locationText: 'South Lawn, Parkville', lat: -37.7989, lng: 144.9634, stats: makeWeekStats(30, 50) },
-      { id: 'e2', title: 'Tech Talk: Vue Best Practices', locationText: 'Old Arts Theatre', lat: -37.7968, lng: 144.9619, stats: makeWeekStats(15, 35) },
-      { id: 'e3', title: 'Music Night', locationText: 'Union House', stats: makeWeekStats(10, 25) }
-    ]
-  }
-  function makeWeekStats(min=10, max=40){
-    const out = []
-    const now = new Date()
-    for (let i=6;i>=0;i--){
-      const d = new Date(now); d.setDate(now.getDate()-i)
-      const date = d.toISOString().slice(0,10)
-      const registered = rand(min, max)
-      const attended   = Math.max(0, registered - rand(0, Math.floor(registered*0.3)))
-      out.push({ date, registered, attended })
-    }
-    return out
-  }
-  function rand(a,b){ return Math.floor(Math.random()*(b-a+1))+a }
-  function guessDateRange(ev){
-    const first = ev.stats?.[0]?.date, last = ev.stats?.[ev.stats.length-1]?.date
-    return (first && last) ? `${first} ~ ${last}` : 'See schedule'
-  }
   </script>
   
   <style scoped>
+  /* —— 保持你的样式原样 —— */
   .dash { display:flex; flex-direction:column; gap:16px }
-  
-  /* 卡片容器 */
   .panel{ background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:14px }
-  
-  /* 字段容器 */
   .field{ display:flex; flex-direction:column; gap:6px }
   .lbl{ font-weight:600 }
   .input{ border:1px solid #d1d5db; border-radius:8px; padding:8px; min-height:36px }
-  
-  /* 行布局（分别用于不同面板） */
   .row-2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; align-items:end }
   .row-3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; align-items:end }
   .row-auto{ display:grid; grid-auto-flow:column; gap:12px; align-items:center }
-  
-  @media (max-width: 900px){
-    .row-2, .row-3{ grid-template-columns:1fr }
-  }
-  
-  /* 按钮 */
+  @media (max-width: 900px){ .row-2, .row-3{ grid-template-columns:1fr } }
   .btn{ border:1px solid #475569; background:#f8fafc; color:#111827; border-radius:8px; padding:8px 12px; cursor:pointer }
   .btn.primary{ background:#1d4ed8; color:#fff; border:none }
   .btn:focus-visible{ outline:3px solid #0ea5e9; outline-offset:2px }
-  
-  /* 图表 */
   .chart{ width:100%; height:360px; }
-  
-  /* 摘要 */
   .summary{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px }
   .pill{ display:inline-flex; gap:6px; align-items:center; background:#f1f5f9; border:1px solid #e2e8f0; border-radius:999px; padding:2px 8px }
-  
-  /* 文案 */
   .mini{ font-size:12px }
   .muted{ color:#6b7280 }
   code{ background:#f1f5f9; padding:2px 4px; border-radius:6px; font-size:12px }
-  
-  /* 二维码 */
   .qrwrap{ display:flex; gap:16px; align-items:center }
   .qrwrap img{ width:160px; height:160px; border:1px solid #e5e7eb; border-radius:10px; padding:6px; background:#fff }
-  
-  /* 文本域栅格 */
   .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:12px }
   @media (max-width: 900px){ .grid2{ grid-template-columns:1fr } }
-  
-  /* 对齐辅助 */
   .right{ display:flex; justify-content:flex-end }
   .sr-only{ position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden }
   </style>

@@ -126,13 +126,11 @@
             </td>
             <td>
               <div class="rate-cell">
-                <!-- 交互评分（本用户） -->
                 <StarRating
                   v-model="ev.myRating"
                   :label="ev.title"
                   @update:modelValue="v => onRate(ev.id, v)"
                 />
-                <!-- 平均分显示 -->
                 <span class="avg-num" :title="`Average rating`">{{ ev.avgRating.toFixed(2) }}</span>
               </div>
             </td>
@@ -154,18 +152,14 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, onMounted, onBeforeUnmount } from 'vue'
 
-/* ---------- 星级评分子组件（纯模板版，无需 JSX 插件） ---------- */
+/* ---------- 星级评分组件（保持你的交互） ---------- */
 const StarRating = {
   name: 'StarRating',
   inheritAttrs: false,
-  props: {
-    modelValue: { type: Number, default: 0 },
-    label: { type: String, default: 'item' }
-  },
+  props: { modelValue: { type: Number, default: 0 }, label: { type: String, default: 'item' } },
   emits: ['update:modelValue'],
-  data(){ return { hover: 0 } },
   computed: {
     value(){ return Math.min(5, Math.max(0, Number(this.modelValue)||0)) }
   },
@@ -175,25 +169,19 @@ const StarRating = {
   },
   template: `
     <div class="stars" role="group" :aria-label="'Rate ' + label">
-      <button
-        v-for="n in 5"
-        :key="n"
-        class="star"
+      <button v-for="n in 5" :key="n" class="star"
         :aria-pressed="n <= value"
         :aria-label="'Rate ' + n + ' out of 5'"
-        @click="set(n)"
-        @keydown="keySet(n, $event)"
-      >{{ n <= value ? '★' : '☆' }}</button>
-    </div>
-  `
+        @click="set(n)" @keydown="keySet(n, $event)">{{ n <= value ? '★' : '☆' }}</button>
+    </div>`
 }
 
-/* ---------- 本地聚合评分存储（localStorage: ratingsIndex） ---------- */
+/* ---------- 评分聚合：沿用你之前的 localStorage 结构 ---------- */
 function getIndex() {
   try { return JSON.parse(localStorage.getItem('ratingsIndex') || '{}') } catch { return {} }
 }
 function setIndex(idx) { localStorage.setItem('ratingsIndex', JSON.stringify(idx)) }
-function seedIfMissing(id, avg, seedCount = 10) {
+function seedIfMissing(id, avg, seedCount = 0) { // 默认0，改成“真实评分=用户打分才增长”
   const idx = getIndex()
   if (!idx[id]) {
     idx[id] = { total: Number(avg || 0) * seedCount, count: seedCount, userScore: 0 }
@@ -222,7 +210,7 @@ function getAvgRating(id) {
   return rec.total / rec.count
 }
 
-/* —— Data —— */
+/* ---------- 你的 20 条基础数据（保持不动） ---------- */
 const rows = ref([
   { id: 101, title: 'Welcome Fair', organizer: 'Student Union', category: 'Festival', venue: 'Main Lawn', date: '2025-03-02T10:00:00', seats:{taken:320,total:500}, price:0, status:'Open', rating:4.6 },
   { id: 102, title: 'Intro to Vue 3 Workshop', organizer: 'IT Club', category: 'Workshop', venue: 'IT Building 203', date: '2025-03-05T18:00:00', seats:{taken:45,total:60}, price:0, status:'Open', rating:4.8 },
@@ -246,13 +234,53 @@ const rows = ref([
   { id: 120, title: 'Thesis Writing Clinic', organizer: 'Graduate School', category: 'Workshop', venue: 'Grad Centre Rm 5', date: '2025-04-04T14:00:00', seats:{taken:35,total:50}, price:0, status:'Open', rating:4.3 },
 ])
 
-/* —— 首次运行：用初始 rating 作为平均分的种子 —— */
-rows.value.forEach(r => seedIfMissing(r.id, r.rating, 10))
+/* —— 首次运行：把20条写到评分索引（不加种子，平均值从 0 开始，直到有人评分） —— */
+rows.value.forEach(r => seedIfMissing(r.id, 0, 0))
 rows.value = rows.value.map(r => ({
   ...r,
   myRating: getMyRating(r.id),
-  avgRating: Number(getAvgRating(r.id) || r.rating || 0),
+  avgRating: Number(getAvgRating(r.id) || 0),
 }))
+
+/* —— 合并 Admin 新增的活动（来自 localStorage: catalog_items） —— */
+function loadExtraItems(){
+  let extra = []
+  try { extra = JSON.parse(localStorage.getItem('catalog_items') || '[]') } catch { extra = [] }
+  const has = new Set(rows.value.map(r => String(r.id)))
+  const append = []
+  for (const d of extra){
+    if (!d || d.id==null) continue
+    const id = String(d.id)
+    if (has.has(id)) continue
+    seedIfMissing(id, 0, 0)
+    append.push({
+      id: isNaN(+id) ? id : Number(id),
+      title: d.title || `Event ${id}`,
+      organizer: d.organizer || '',
+      category: d.category || '',
+      venue: d.venue || '',
+      date: d.date || new Date().toISOString(),
+      seats: d.seats || { taken: 0, total: 0 },
+      price: typeof d.price === 'number' ? d.price : 0,
+      status: d.status || 'Open',
+      myRating: getMyRating(id),
+      avgRating: Number(getAvgRating(id) || 0),
+    })
+  }
+  if (append.length) rows.value = rows.value.concat(append)
+}
+onMounted(() => {
+  loadExtraItems()
+  // 当 Admin 页面在另一个 tab 改动时，自动同步
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'catalog_items' || e.key === 'ratingsIndex') {
+      // 更新新增项和平均分
+      loadExtraItems()
+      rows.value = rows.value.map(r => ({ ...r, avgRating: Number(getAvgRating(r.id) || 0), myRating: getMyRating(r.id) }))
+    }
+  })
+})
+onBeforeUnmount(() => window.removeEventListener?.('storage', ()=>{}))
 
 /* —— Filters / Sorting / Paging —— */
 const q = ref('')
@@ -262,7 +290,7 @@ const minRating = ref(0)
 const perPage = ref(10)
 const page = ref(1)
 
-const categories = [...new Set(rows.value.map(r => r.category))].sort()
+const categories = computed(() => [...new Set(rows.value.map(r => r.category).filter(Boolean))].sort())
 
 const sort = reactive({ key: 'date', dir: 'asc' })
 function sortBy(k){
@@ -281,7 +309,7 @@ const filtered = computed(() => {
   }
   if (cat.value) list = list.filter(r => r.category === cat.value)
   if (status.value) list = list.filter(r => r.status === status.value)
-  if (minRating.value) list = list.filter(r => (r.avgRating ?? r.rating) >= minRating.value)
+  if (minRating.value) list = list.filter(r => (r.avgRating ?? 0) >= minRating.value)
   return list
 })
 
@@ -290,7 +318,7 @@ const sorted = computed(() => {
   list.sort((a,b) => {
     const k = sort.key
     let av = a[k], bv = b[k]
-    if (k === 'rating') { av = a.avgRating ?? a.rating; bv = b.avgRating ?? b.rating }
+    if (k === 'rating') { av = a.avgRating ?? 0; bv = b.avgRating ?? 0 }
     if (k === 'date') { av = +new Date(a.date); bv = +new Date(b.date) }
     if (typeof av === 'string') { av = av.toLowerCase(); bv = bv.toLowerCase() }
     const cmp = av > bv ? 1 : av < bv ? -1 : 0
@@ -306,14 +334,14 @@ const pageRows = computed(() => {
 })
 function goFirst(){ page.value = 1 }
 
-/* —— 评分变更 —— */
+/* —— 评分变更：更新本地索引并刷新平均分 —— */
 function onRate(id, v){
   setMyRating(id, v)
-  const r = rows.value.find(x => x.id === id)
+  const r = rows.value.find(x => String(x.id) === String(id))
   if (r) r.avgRating = Number(getAvgRating(id).toFixed(2))
 }
 
-/* —— Export —— */
+/* —— Export（保持你的逻辑） —— */
 function exportCSV(){
   const headers = ['Event','Organizer','Category','Venue','Date','Seats','Price','Status','Rating']
   const lines = sorted.value.map(r => ([
@@ -322,7 +350,7 @@ function exportCSV(){
     `${r.seats.taken}/${r.seats.total}`,
     fmtPrice(r.price),
     r.status,
-    (r.avgRating ?? r.rating).toFixed(2)
+    (r.avgRating ?? 0).toFixed(2)
   ]))
   const csv = [headers, ...lines]
     .map(row => row.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(','))
@@ -347,7 +375,7 @@ function exportPDF(){
         <td>${r.seats.taken}/${r.seats.total}</td>
         <td>${esc(fmtPrice(r.price))}</td>
         <td>${esc(r.status)}</td>
-        <td>${(r.avgRating ?? r.rating).toFixed(2)}</td>
+        <td>${(r.avgRating ?? 0).toFixed(2)}</td>
       </tr>
     `
   }).join('')

@@ -27,6 +27,8 @@ app.use(PrimeVue, {
 app.use(router)
 
 app.mount('#app')
+// 可选：访问  /?seed=1  自动导入；访问 /?seed=force 强制覆盖导入
+
 
 // ✅ 初始化 Auth 状态同步（不影响布局）
 initAuthBridge()

@@ -30,11 +30,10 @@
           <label class="lbl" for="cmt">Comment</label>
           <textarea id="cmt" class="input" rows="3" v-model.trim="comment" placeholder="Say something helpful (5–250 chars)"></textarea>
   
-          <div class="mini muted">Logged in as: <strong>{{ store.state.session?.displayName || 'Guest' }}</strong></div>
+          <div class="mini muted">Logged in as: <strong>{{ displayName }}</strong></div>
   
           <div class="actions">
-            <button class="btn primary" type="submit" :disabled="!store.state.session">Submit review</button>
-            <span class="muted" v-if="!store.state.session">Please login first.</span>
+            <button class="btn primary" type="submit">Submit review</button>
           </div>
   
           <p class="ok" v-if="ok">{{ ok }}</p>
@@ -75,15 +74,95 @@
   </template>
   
   <script setup>
-  import { computed, ref } from 'vue'
+  import { computed, ref, onMounted, watch } from 'vue'
   import { useStore } from '../utils/useStore'
   
-  const store = useStore()
-  const items = computed(() => store.state.items || [])
-  const pickId = ref(items.value[0]?.id || null)
+  /* —— 简单会话显示（没有后端也能用） —— */
+  const store = useStore?.() || {}
+  const session = store?.state?.session || null
+  const displayName = computed(() => session?.displayName || session?.email?.split('@')[0] || 'Guest')
+  const uid = computed(() => session?.uid || 'guest')
   
-  const current = computed(() => items.value.find(i => i.id === pickId.value))
-  const avg = computed(() => current.value ? store.avgRating(current.value) : 0)
+  /* —— 读全量活动：20条基础 + Admin 新增（localStorage） —— */
+  function base20(){
+    return [
+      { id: 101, title: 'Welcome Fair', category: 'Festival', description: 'Student Union · Main Lawn · Festival' },
+      { id: 102, title: 'Intro to Vue 3 Workshop', category: 'Workshop', description: 'IT Club · IT Building 203 · Workshop' },
+      { id: 103, title: 'Data Science Seminar', category: 'Talk', description: 'Engineering Faculty · Eng LT-1 · Talk' },
+      { id: 104, title: 'Acoustic Night', category: 'Music', description: 'Music Society · Student Theatre · Music' },
+      { id: 105, title: 'Career Fair', category: 'Fair', description: 'Careers & Employability · Convention Hall · Fair' },
+      { id: 106, title: 'Basketball: Intra-school Cup', category: 'Sports', description: 'Sports Centre · Court A · Sports' },
+      { id: 107, title: 'Photography Walk', category: 'Outdoor', description: 'Art Club · City Trail · Outdoor' },
+      { id: 108, title: 'Startup Pitch Night', category: 'Competition', description: 'Entrepreneurship Club · Biz Hub 1F · Competition' },
+      { id: 109, title: 'Python for Research', category: 'Workshop', description: 'Library · Lib Lab B · Workshop' },
+      { id: 110, title: 'Cultural Food Market', category: 'Festival', description: 'Global Lounge · Quad · Festival' },
+      { id: 111, title: 'Game Jam 24h', category: 'Competition', description: 'Gaming Club · Lab 4 · Competition' },
+      { id: 112, title: 'Machine Learning 101', category: 'Talk', description: 'CS Dept · CS LT · Talk' },
+      { id: 113, title: 'Badminton Friendly', category: 'Sports', description: 'Sports Centre · Hall B · Sports' },
+      { id: 114, title: 'Sustainability Forum', category: 'Forum', description: 'Green Office · Admin LT · Forum' },
+      { id: 115, title: 'Debate: AI in Education', category: 'Debate', description: 'Debate Society · Humanities LT-2 · Debate' },
+      { id: 116, title: 'Volunteer Day', category: 'Volunteer', description: 'Community Service · Neighborhood Centre · Volunteer' },
+      { id: 117, title: 'Film Night: Classics', category: 'Movie', description: 'Film Club · Cinema Hall · Movie' },
+      { id: 118, title: 'Hackathon (48h)', category: 'Competition', description: 'CS Dept · Innovation Hub · Competition' },
+      { id: 119, title: 'Jazz Evening', category: 'Music', description: 'Music Society · Auditorium · Music' },
+      { id: 120, title: 'Thesis Writing Clinic', category: 'Workshop', description: 'Graduate School · Grad Centre Rm 5 · Workshop' },
+    ]
+  }
+  function readExtras(){
+    try { return JSON.parse(localStorage.getItem('catalog_items') || '[]') } catch { return [] }
+  }
+  function mergeItems(){
+    const base = base20()
+    const has = new Set(base.map(b => String(b.id)))
+    const extras = readExtras().map(e => ({
+      id: isNaN(+e.id) ? e.id : Number(e.id),
+      title: e.title || `Event ${e.id}`,
+      category: e.category || '',
+      description: `${e.organizer || ''} · ${e.venue || ''} · ${e.category || ''}`.replace(/^ · /,'').replace(/ · $/,'')
+    }))
+    const add = extras.filter(x => !has.has(String(x.id)))
+    return base.concat(add)
+  }
+  
+  /* —— 评分索引（与 Catalog 同结构，确保联动） —— */
+  function getIndex(){ try { return JSON.parse(localStorage.getItem('ratingsIndex') || '{}') } catch { return {} } }
+  function setIndex(idx){ localStorage.setItem('ratingsIndex', JSON.stringify(idx)) }
+  function ensureRec(id){
+    const idx = getIndex()
+    if (!idx[id]){ idx[id] = { total: 0, count: 0, userScore: 0 }; setIndex(idx) }
+  }
+  function avgOf(id){
+    const rec = getIndex()[id]
+    return (!rec || rec.count===0) ? 0 : (rec.total / rec.count)
+  }
+  function addRating(id, val){
+    const idx = getIndex()
+    const rec = idx[id] || { total: 0, count: 0, userScore: 0 }
+    const prev = Number(rec.userScore || 0)
+    const firstTime = prev === 0
+    rec.userScore = val
+    rec.total += (val - prev)
+    if (firstTime) rec.count += 1
+    idx[id] = rec
+    setIndex(idx)
+  }
+  
+  /* —— 评论表 —— */
+  function readReviews(){ try { return JSON.parse(localStorage.getItem('reviews') || '[]') } catch { return [] } }
+  function writeReviews(list){ localStorage.setItem('reviews', JSON.stringify(list)) }
+  
+  /* —— 组件状态 —— */
+  const items = ref(mergeItems())
+  items.value.forEach(it => ensureRec(String(it.id)))
+  
+  const pickId = ref(items.value[0]?.id || null)
+  const current = computed(() => {
+    const it = items.value.find(i => String(i.id) === String(pickId.value))
+    if (!it) return null
+    const all = readReviews().filter(r => String(r.itemId) === String(it.id))
+    return { ...it, reviews: all }
+  })
+  const avg = computed(() => current.value ? avgOf(String(current.value.id)) : 0)
   
   const rating = ref(5)
   const comment = ref('')
@@ -92,17 +171,51 @@
   
   function submit(){
     ok.value = err.value = ''
+    if (!current.value){ err.value = 'Please select an item.'; return }
+    if (!(rating.value >= 1 && rating.value <= 5)){ err.value = 'Rating must be 1–5.'; return }
+    if (comment.value && (comment.value.length < 5 || comment.value.length > 250)){
+      err.value = 'Comment length must be 5–250 characters.'; return
+    }
+  
     try{
-      store.submitReview(pickId.value, { rating: rating.value, comment: comment.value })
+      // 1) 写入评分索引（会联动 Catalog）
+      addRating(String(current.value.id), Number(rating.value))
+  
+      // 2) 写入评论表
+      const list = readReviews()
+      list.push({
+        id: crypto?.randomUUID?.() || String(Date.now()) + Math.random().toString(16).slice(2),
+        itemId: String(current.value.id),
+        rating: Number(rating.value),
+        comment: comment.value || '',
+        userId: uid.value,
+        byName: displayName.value,
+        createdAt: Date.now()
+      })
+      writeReviews(list)
+  
+      // 3) 刷新当前项
+      items.value = mergeItems()
       ok.value = 'Thanks for your review!'
       comment.value = ''
     }catch(e){
-      err.value = e.message || 'Failed'
+      err.value = e?.message || 'Failed'
     }
   }
   
-  const myReviews = computed(() => store.userReviews())
-  function findItem(id){ return items.value.find(i => i.id===id) }
+  /* —— 我的评论 —— */
+  const myReviews = computed(() => readReviews().filter(r => r.userId === uid.value))
+  function findItem(id){ return items.value.find(i => String(i.id)===String(id)) }
+  
+  /* —— 当 Admin 新增/删除 或其它标签页评分/评论时，自动同步 —— */
+  onMounted(() => {
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'catalog_items' || e.key === 'reviews' || e.key === 'ratingsIndex') {
+        items.value = mergeItems()
+      }
+    })
+  })
+  watch(pickId, () => { ok.value = ''; err.value = '' })
   </script>
   
   <style scoped>

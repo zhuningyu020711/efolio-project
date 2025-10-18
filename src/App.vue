@@ -13,8 +13,7 @@
       <button type="button" class="btn" v-if="store.state.session" :aria-current="page==='dashboard' ? 'page' : null" @click="go('dashboard')" aria-label="Open Dashboard">Dashboard</button>
       <button type="button" class="btn" v-if="isAdmin" :aria-current="page==='admin' ? 'page' : null" @click="go('admin')" aria-label="Open Admin">Admin</button>
       <button type="button" class="btn" :aria-current="page==='map' ? 'page' : null" @click="go('map')" aria-label="Open Map">Map</button>
-      <button type="button" class="btn" @click="resetData" aria-label="Reset demo data">Reset Data</button>
-
+      
       <template v-if="!store.state.session">
         <button type="button" class="btn" :aria-current="page==='auth' ? 'page' : null" @click="go('auth')" aria-label="Login or Register">
           Login / Register
