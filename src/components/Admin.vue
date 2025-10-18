@@ -1,61 +1,108 @@
 <template>
   <section class="admin">
-    <div class="panel">
-      <h3>Users</h3>
-      <p class="muted mini">This list is filled when users login (Firebase or dev-admin). Dev admin: <code>admin@demo.local / admin123</code></p>
-      <div class="table-wrap">
-        <table class="tbl">
-          <thead>
-            <tr>
-              <th>Email</th><th>Name</th><th>Role</th><th>User Id</th><th>Last Login</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="u in users" :key="u.id">
-              <td>{{ u.email }}</td>
-              <td>{{ u.displayName }}</td>
-              <td><span class="tag" :class="u.role">{{ u.role }}</span></td>
-              <td>{{ u.id }}</td>
-              <td>{{ u.lastLogin ? new Date(u.lastLogin).toLocaleString() : '-' }}</td>
-            </tr>
-            <tr v-if="users.length===0"><td colspan="5" class="muted">No user yet.</td></tr>
-          </tbody>
-        </table>
+    <template v-if="!isAdmin">
+      <div class="panel">
+        <h3>Admins only</h3>
+        <p class="muted">You must be an administrator to view this page.</p>
       </div>
-    </div>
+    </template>
 
-    <div class="panel">
-      <h3>Items & Reviews (read-only)</h3>
-      <div class="table-wrap">
-        <table class="tbl">
-          <thead>
-            <tr>
-              <th>Title</th><th>Category</th><th>#Reviews</th><th>Average</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="it in items" :key="it.id">
-              <td>{{ it.title }}</td>
-              <td>{{ it.category }}</td>
-              <td>{{ it.reviews.length }}</td>
-              <td>{{ avg(it).toFixed(2) }}</td>
-            </tr>
-          </tbody>
-        </table>
+    <template v-else>
+      <div class="panel">
+        <h3>Current Session</h3>
+        <p class="muted mini">
+          <strong>{{ session?.email }}</strong>
+          <span class="tag admin" v-if="isAdmin">admin</span>
+          <span class="tag user" v-else>user</span>
+        </p>
+        <p class="mini muted">UID: {{ session?.uid || session?.id }}</p>
       </div>
-      <p class="muted mini">Use the <strong>Reviews</strong> page to add ratings/comments.</p>
-    </div>
+
+      <div class="panel">
+        <h3>Users</h3>
+        <p class="muted mini">
+          This table is populated when users sign in.
+          Dev admin: <code>admin@demo.local</code>
+        </p>
+
+        <div class="table-wrap">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Name</th>
+                <th>Role</th>
+                <th>User Id</th>
+                <th>Last Login</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="u in users" :key="u.id">
+                <td>{{ u.email }}</td>
+                <td>{{ u.displayName }}</td>
+                <td><span class="tag" :class="u.role">{{ u.role || 'user' }}</span></td>
+                <td class="mono">{{ u.id || u.uid }}</td>
+                <td class="mono">{{ formatTime(u.lastLogin) }}</td>
+              </tr>
+              <tr v-if="users.length===0">
+                <td colspan="5" class="muted">No users yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </template>
   </section>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useStore } from '../utils/useStore'
 
+// Firebase Auth（只用来监听会话变化）
+import { getAuth, onAuthStateChanged } from 'firebase/auth'
+
 const store = useStore()
-const users = computed(() => store.state.users || [])
-const items = computed(() => store.state.items || [])
-const avg = store.avgRating
+const auth = getAuth()
+
+const session = computed(() => store.state?.session ?? null)
+const users   = computed(() => store.state?.users ?? [])
+// store.isAdmin 在 useStore.js 里是 computed，直接拿它的 .value
+const isAdmin = computed(() => {
+  const raw = store.isAdmin?.value
+  if (typeof raw !== 'undefined') return !!raw
+  // 兜底逻辑：如果 session.role==='admin' 或 email 命中 dev admin
+  const s = session.value
+  const email = (s?.email || '').toLowerCase()
+  return s?.role === 'admin' || email === 'admin@demo.local'
+})
+
+function formatTime(t){
+  if (!t) return '—'
+  try{
+    const d = new Date(t)
+    return isNaN(d.getTime()) ? '—' : d.toLocaleString()
+  }catch{ return '—' }
+}
+
+// 监听 Firebase 登录态，保持和本地 store 同步
+onMounted(() => {
+  onAuthStateChanged(auth, (user) => {
+    if (user){
+      const sess = {
+        id: user.uid,
+        uid: user.uid,
+        email: user.email || '',
+        displayName: user.displayName || (user.email ? user.email.split('@')[0] : 'User'),
+        role: (user.email || '').toLowerCase() === 'admin@demo.local' ? 'admin' : 'user',
+        lastLogin: Date.now(),
+      }
+      store.setSession?.(sess)
+    } else {
+      store.clearSession?.()
+    }
+  })
+})
 </script>
 
 <style scoped>
@@ -65,6 +112,7 @@ const avg = store.avgRating
 .tbl{width:100%;border-collapse:separate;border-spacing:0}
 .tbl thead th{background:#eef2f7;font-weight:700;border-bottom:1px solid #dce3ea}
 .tbl th,.tbl td{padding:10px;border-bottom:1px solid #eef2f7;vertical-align:top}
+.mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
 .muted{color:#6b7280}
 .mini{font-size:12px}
 .tag{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid #e5e7eb;background:#f8fafc;text-transform:capitalize}
